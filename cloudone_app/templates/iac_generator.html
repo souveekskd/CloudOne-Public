@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CloudOne - IaC Generator</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <link rel="stylesheet" href="/static/css/main.css">
+
+    <style>
+        .header-title { font-size: 1.5em; color: #74bcff; }
+        .content { display: flex; height: calc(100vh - 100px); }
+
+        /* Left Column: Form */
+        .form-panel { flex: 2; padding: 25px; background: #181818; overflow-y: auto; border-right: 1px solid #333; }
+        .form-panel h2 { color: #74bcff; margin-top: 0; }
+        .form-group label { display: block; margin: 0 5px 10px 0; font-size: 1.1em; font-weight: bold; }
+        
+        .radio-group label { display: inline-block; margin-right: 10px; }
+        #terraformOptions {
+            display: none; /* Hidden by default */
+            background: #222;
+            padding: 15px;
+            border-radius: 8px;
+            margin-left: 20px;
+            margin-top: 10px;
+        }
+
+        .resource-list {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            background: #222;
+            padding: 15px;
+            border-radius: 8px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .resource-list label { display: block; background: #333; padding: 8px 12px; border-radius: 5px; cursor: pointer; }
+        .resource-list input[type="checkbox"] { margin-right: 10px; }
+        button#generateBtn:disabled { background: #333; }
+
+        /* Right Column: Output */
+        .output-panel { flex: 3; display: flex; flex-direction: column; height: 100%; }
+        .editor-area { display: flex; flex-grow: 1; height: 1%; }
+        .button-bar {
+            flex-shrink: 0;
+            padding: 15px 20px;
+            background: #222;
+            border-top: 1px solid #333;
+            display: flex;
+            gap: 10px;
+        }
+
+        /* File Tree */
+        .file-tree-container { flex: 1; background: #222; padding: 20px; overflow-y: auto; border-right: 1px solid #333; color: #ccc; }
+        .file-tree-container ul { list-style-type: none; padding-left: 15px; }
+        .file-tree-container li { padding: 5px 0; }
+        .tree-folder { font-weight: bold; color: #74bcff; }
+        .tree-file { cursor: pointer; padding-left: 15px; }
+        .tree-file:hover { background: #333; }
+        .tree-file.active { background: #1565c0; color: #fff; }
+
+        /* Code Viewer */
+        .code-viewer-container { flex: 3; display: flex; flex-direction: column; }
+        .code-header { padding: 10px 20px; background: #222; font-family: 'Courier New', Courier, monospace; color: #74bcff; border-bottom: 1px solid #333; }
+        .code-viewer {
+            flex-grow: 1;
+            padding: 20px;
+            background: #1E1E1E;
+            font-family: 'Courier New', Courier, monospace;
+            white-space: pre; /* Use 'pre' for better code formatting */
+            overflow: auto; /* Change to 'auto' for horizontal scroll */
+            font-size: 0.9em;
+            color: #D4D4D4;
+        }
+        .loader-text { text-align: center; padding: 50px; font-size: 1.2em; color: #aaa; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <i class="fas fa-arrow-left header-icon" id="backIcon"></i>
+        <div class="header-title">Infrastructure as Code Generator</div>
+        <div></div>
+    </div>
+    <div class="content">
+        <div class="form-panel">
+            <form id="iacForm">
+                <div class="form-group">
+                    <label>1. Select IaC Technology</label>
+                    <div class="radio-group">
+                        <input type="radio" id="typeBicep" name="iac_type" value="bicep">
+                        <label for="typeBicep">Bicep</label>
+                        
+                        <input type="radio" id="typeArm" name="iac_type" value="arm">
+                        <label for="typeArm">ARM</label>
+                        
+                        <input type="radio" id="typeTerraform" name="iac_type" value="terraform" checked>
+                        <label for="typeTerraform">Terraform</label>
+                    </div>
+                    
+                    <div id="terraformOptions">
+                        <label>Terraform Module Type</label>
+                        <div class="radio-group">
+                            <input type="radio" id="typeCustom" name="module_type" value="custom" checked>
+                            <label for="typeCustom"><i class="fas fa-pen-ruler"></i> Custom Module</label>
+                            
+                            <input type="radio" id="typeAvm" name="module_type" value="avm">
+                            <label for="typeAvm"><i class="fas fa-check-double"></i> AVM Module</label>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>2. Select Resources</label>
+                    <div class="resource-list">
+                        <div><label><input type="checkbox" name="resource" value="azurerm_resource_group"> Resource Group</label></div>
+                        <div><label><input type="checkbox" name="resource" value="azurerm_virtual_network"> Virtual Network</label></div>
+                        <div><label><input type="checkbox" name="resource" value="azurerm_subnet"> Subnet</label></div>
+                        <div><label><input type="checkbox" name="resource" value="azurerm_network_security_group"> NSG</label></div>
+                        <div><label><input type="checkbox" name="resource" value="azurerm_public_ip"> Public IP</label></div>
+                        <div><label><input type="checkbox" name="resource" value="azurerm_network_interface"> Network Interface</label></div>
+                        <div><label><input type="checkbox" name="resource" value="azurerm_windows_virtual_machine"> Windows VM</label></div>
+                        <div><label><input type="checkbox" name="resource" value="azurerm_linux_virtual_machine"> Linux VM</label></div>
+                        <div><label><input type="checkbox" name="resource" value="azurerm_storage_account"> Storage Account</label></div>
+                        <div><label><input type="checkbox" name="resource" value="azurerm_managed_disk"> Managed Disk</label></div>
+                        <div><label><input type="checkbox" name="resource" value="azurerm_sql_server"> SQL Server</label></div>
+                        <div><label><input type="checkbox" name="resource" value="azurerm_sql_database"> SQL Database</label></div>
+                        <div><label><input type="checkbox" name="resource" value="azurerm_cosmosdb_account"> Cosmos DB</label></div>
+                        <div><label><input type="checkbox" name="resource" value="azurerm_load_balancer"> Load Balancer</label></div>
+                        <div><label><input type="checkbox" name="resource" value="azurerm_application_gateway"> App Gateway</label></div>
+                        <div><label><input type="checkbox" name="resource" value="azurerm_private_endpoint"> Private Endpoint</label></div>
+                        <div><label><input type="checkbox" name="resource" value="azurerm_key_vault"> Key Vault</label></div>
+                    </div>
+                </div>
+                <button id="generateBtn" type="submit" class="btn btn-primary" style="width: 100%; font-size: 1.1em;">Generate Code</button>
+            </form>
+        </div>
+        <div class="output-panel">
+            <div class="editor-area">
+                <div class="file-tree-container" id="fileTreeContainer"></div>
+                <div class="code-viewer-container">
+                    <div class="code-header" id="codeHeader"></div>
+                    <div class="code-viewer" id="codeViewer">
+                        <pre class="code-viewer-pre" id="codeContent"><div class="loader-text" id="outputLoader">
+                            Select options and click "Generate" to see the IaC code.
+                        </div></pre>
+                    </div>
+                </div>
+            </div>
+            <div class="button-bar" id="buttonBar" style="display: none;">
+                <button id="btnEditCode" class="btn btn-primary"><i class="fas fa-edit"></i> Edit Code</button>
+                <button id="btnSaveCode" class="btn hidden" style="background: #4CAF50;"><i class="fas fa-save"></i> Save Changes</button>
+                <button id="btnExport" class="btn btn-primary"><i class="fas fa-file-archive"></i> Export</button>
+                <button id="btnPushRepo" class="btn" title="Requires backend implementation" style="background: #555; cursor: not-allowed;"><i class="fas fa-upload"></i> Push to Repo</button>
+            </div>
+        </div>
+    </div>
+    <script>
+        const backIcon = document.getElementById("backIcon");
+        const iacForm = document.getElementById("iacForm");
+        const generateBtn = document.getElementById("generateBtn");
+        
+        const fileTreeContainer = document.getElementById("fileTreeContainer");
+        const codeHeader = document.getElementById("codeHeader");
+        const codeViewer = document.getElementById("codeViewer");
+        const codeContent = document.getElementById("codeContent");
+        const outputLoader = document.getElementById("outputLoader");
+        
+        const buttonBar = document.getElementById("buttonBar");
+        const btnEditCode = document.getElementById("btnEditCode");
+        const btnSaveCode = document.getElementById("btnSaveCode");
+        const btnExport = document.getElementById("btnExport");
+        
+        const terraformOptions = document.getElementById("terraformOptions");
+
+        let generatedFiles = {}; // This will hold the full {iac_type: ..., files: {...}} response
+        let currentFile = { path: null, name: null };
+        let currentIacType = 'terraform'; // Default
+
+        backIcon.onclick = () => { window.location.href = "/azure_landing"; };
+        
+        // --- Form Submission ---
+        iacForm.onsubmit = (e) => {
+            e.preventDefault();
+            generateModule();
+        };
+
+        // --- Handle Radio Button Logic ---
+        document.querySelectorAll('input[name="iac_type"]').forEach(radio => {
+            radio.onchange = (e) => {
+                currentIacType = e.target.value;
+                terraformOptions.style.display = (currentIacType === 'terraform') ? 'block' : 'none';
+            };
+        });
+        // Trigger on load
+        terraformOptions.style.display = 'block';
+
+
+        function generateModule() {
+            const formData = new FormData(iacForm);
+            const iac_type = formData.get("iac_type");
+            const module_type = formData.get("module_type");
+            const resources = formData.getAll("resource");
+            
+            if (resources.length === 0) {
+                alert("Please select at least one resource.");
+                return;
+            }
+
+            // --- Reset UI ---
+            fileTreeContainer.innerHTML = "";
+            codeHeader.textContent = "";
+            codeContent.innerHTML = "";
+            outputLoader.textContent = "The AI Architect is generating your code...";
+            outputLoader.style.display = "block";
+            codeViewer.appendChild(outputLoader);
+            generateBtn.disabled = true;
+            buttonBar.style.display = "none";
+
+            fetch('/api/iac/generate', { // <-- Using new API endpoint
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ iac_type, module_type, resources })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                generatedFiles = data; // Store the full response
+                outputLoader.style.display = "none";
+                generateBtn.disabled = false;
+                buttonBar.style.display = "flex";
+
+                // --- This is the new logic ---
+                if (data.iac_type === 'terraform') {
+                    // We have a project, add tfvars
+                    if (data.files.root && data.files.root['variables.tf']) {
+                        generatedFiles.files.root['terraform.tfvars'] = generateTfvars(data.files.root['variables.tf']);
+                    }
+                    buildFileTree(data.files);
+                    // Show file tree, set export to ZIP
+                    fileTreeContainer.style.display = 'block';
+                    btnExport.innerHTML = '<i class="fas fa-file-archive"></i> Export as ZIP';
+                    // Show default file
+                    if (generatedFiles.files.root && generatedFiles.files.root['main.tf']) {
+                        showFileContent('root', 'main.tf');
+                    }
+                } else {
+                    // We have a single file (Bicep/ARM)
+                    // Hide file tree, set export to Download
+                    fileTreeContainer.style.display = 'none';
+                    const filename = Object.keys(data.files)[0];
+                    btnExport.innerHTML = `<i class="fas fa-download"></i> Download ${filename}`;
+                    // Show the single file
+                    showFileContent(null, filename);
+                }
+            })
+            .catch(err => {
+                outputLoader.textContent = `Error: ${err.message}`;
+                generateBtn.disabled = false;
+            });
+        }
+        
+        // --- UI Rendering Functions ---
+        
+        function buildFileTree(files) {
+            fileTreeContainer.innerHTML = "";
+            const rootUl = document.createElement('ul');
+            const rootLi = document.createElement('li');
+            rootLi.innerHTML = `<span class="tree-folder"><i class="fas fa-folder-open"></i> / (root)</span>`;
+            const rootFilesUl = document.createElement('ul');
+            if (files.root) {
+                for (const filename of Object.keys(files.root)) {
+                    const fileLi = document.createElement('li');
+                    fileLi.innerHTML = `<span class="tree-file" data-path="root" data-file="${filename}"><i class="fas fa-file-code"></i> ${filename}</span>`;
+                    rootFilesUl.appendChild(fileLi);
+                }
+            }
+            rootLi.appendChild(rootFilesUl);
+            rootUl.appendChild(rootLi);
+            
+            const modulesLi = document.createElement('li');
+            modulesLi.innerHTML = `<span class="tree-folder"><i class="fas fa-folder"></i> modules/</span>`;
+            const modulesUl = document.createElement('ul');
+            if (files.modules) {
+                for (const moduleName of Object.keys(files.modules)) {
+                    const moduleLi = document.createElement('li');
+                    moduleLi.innerHTML = `<span class="tree-folder"><i class="fas fa-folder"></i> ${moduleName}</span>`;
+                    const moduleFilesUl = document.createElement('ul');
+                    for (const filename of Object.keys(files.modules[moduleName])) {
+                        const fileLi = document.createElement('li');
+                        fileLi.innerHTML = `<span class="tree-file" data-path="modules.${moduleName}" data-file="${filename}"><i class="fas fa-file-code"></i> ${filename}</span>`;
+                        moduleFilesUl.appendChild(fileLi);
+                    }
+                    moduleLi.appendChild(moduleFilesUl);
+                    modulesUl.appendChild(moduleLi);
+                }
+            }
+            modulesLi.appendChild(modulesUl);
+            rootUl.appendChild(modulesLi);
+            fileTreeContainer.appendChild(rootUl);
+            
+            // Add click handlers
+            document.querySelectorAll('.tree-file').forEach(fileEl => {
+                fileEl.onclick = () => {
+                    const path = fileEl.dataset.path;
+                    const file = fileEl.dataset.file;
+                    showFileContent(path, file);
+                };
+            });
+        }
+        
+        function showFileContent(path, filename) {
+            stopEditing();
+            // Reset active selection
+            document.querySelectorAll('.tree-file').forEach(el => el.classList.remove('active'));
+            
+            let content = '';
+            let fullPath = `/${filename}`;
+
+            if (currentIacType === 'terraform') {
+                document.querySelector(`.tree-file[data-path="${path}"][data-file="${filename}"]`).classList.add('active');
+                currentFile.path = path;
+                content = getFileContent(path, filename);
+                fullPath = (path === 'root') ? `/${filename}` : `/modules/${path.split('.')[1]}/${filename}`;
+            } else {
+                // Bicep or ARM
+                currentFile.path = null; // No path, just file
+                content = generatedFiles.files[filename];
+            }
+            
+            currentFile.name = filename;
+            codeHeader.textContent = fullPath;
+            codeContent.textContent = content;
+        }
+
+        // --- Helper Functions ---
+        
+        function getFileContent(path, filename) {
+            // Only for Terraform
+            try {
+                if (path.startsWith('modules.')) {
+                    const moduleName = path.split('.')[1];
+                    return generatedFiles.files.modules[moduleName][filename];
+                } else {
+                    return generatedFiles.files.root[filename];
+                }
+            } catch {
+                return "Error loading file.";
+            }
+        }
+        
+        function updateFileContent(path, filename, newContent) {
+            // Handles all IaC types
+            if (currentIacType === 'terraform') {
+                if (path.startsWith('modules.')) {
+                    const moduleName = path.split('.')[1];
+                    generatedFiles.files.modules[moduleName][filename] = newContent;
+                } else {
+                    generatedFiles.files.root[filename] = newContent;
+                }
+            } else {
+                // Bicep or ARM
+                generatedFiles.files[filename] = newContent;
+            }
+            console.log(`Saved ${filename}`);
+        }
+        
+        function generateTfvars(variablesTfContent) {
+            const varRegex = /variable "([^"]+)"/g;
+            let match;
+            const vars = [];
+            while ((match = varRegex.exec(variablesTfContent)) !== null) {
+                vars.push(match[1]);
+            }
+            return vars.map(v => `${v} = "..." # TODO: Add value`).join('\n');
+        }
+
+        // --- Button Handlers ---
+        
+        function startEditing() {
+            codeContent.contentEditable = "true";
+            codeContent.style.whiteSpace = "pre-wrap"; // Allow editing
+            codeContent.focus();
+            btnEditCode.classList.add("hidden");
+            btnSaveCode.classList.remove("hidden");
+        }
+        
+        function stopEditing() {
+            codeContent.contentEditable = "false";
+            codeContent.style.whiteSpace = "pre"; // Revert for proper code view
+            btnEditCode.classList.remove("hidden");
+            btnSaveCode.classList.add("hidden");
+        }
+        
+        btnEditCode.onclick = () => {
+            startEditing();
+        };
+        
+        btnSaveCode.onclick = () => {
+            const newContent = codeContent.textContent;
+            updateFileContent(currentFile.path, currentFile.name, newContent);
+            stopEditing();
+        };
+        
+        btnExport.onclick = () => {
+            if (currentIacType === 'terraform') {
+                exportTerraformZip();
+            } else {
+                exportSingleFile();
+            }
+        };
+
+        function exportTerraformZip() {
+            const zip = new JSZip();
+            if (generatedFiles.files.root) {
+                for (const [filename, content] of Object.entries(generatedFiles.files.root)) {
+                    zip.file(filename, content);
+                }
+            }
+            if (generatedFiles.files.modules) {
+                const modulesFolder = zip.folder("modules");
+                for (const [moduleName, files] of Object.entries(generatedFiles.files.modules)) {
+                    const moduleFolder = modulesFolder.folder(moduleName);
+                    for (const [filename, content] of Object.entries(files)) {
+                        moduleFolder.file(filename, content);
+                    }
+                }
+            }
+            zip.generateAsync({ type: "blob" })
+                .then(function(blob) {
+                    downloadBlob(blob, "terraform-module.zip");
+                });
+        }
+
+        function exportSingleFile() {
+            const filename = currentFile.name;
+            const content = generatedFiles.files[filename];
+            const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+            downloadBlob(blob, filename);
+        }
+
+        function downloadBlob(blob, filename) {
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+        
+    </script>
+</body>
+</html>

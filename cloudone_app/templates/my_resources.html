@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CloudOne - My Resources</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="/static/css/main.css">
+    
+    <style>
+        .content {
+            display: flex;
+            flex: 1;
+            padding: 20px;
+            gap: 20px;
+        }
+        .resources-section {
+            flex: 3;
+            background: #181818;
+            border-radius: 10px;
+            padding: 20px;
+        }
+        .ai-insight-section {
+            flex: 1;
+            background: #181818;
+            border-radius: 10px;
+            padding: 20px;
+            height: fit-content;
+        }
+        .ai-insight-section h3 {
+            color: #74bcff;
+        }
+        .category {
+            margin-bottom: 20px;
+        }
+        th {
+            cursor: pointer; /* Page-specific for sorting */
+        }
+        #resourceChart {
+            max-height: 300px;
+            margin-bottom: 30px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <i class="fas fa-arrow-left header-icon" id="backIcon"></i>
+        <div class="dropdown-group">
+            <label>Tenant:</label>
+            <select id="tenantDropdown"><option>Loading...</option></select>
+            <label>Subscription:</label>
+            <select id="subscriptionDropdown"><option>Loading...</option></select>
+        </div>
+    </div>
+    <div class="content">
+        <div class="resources-section">
+            <h2>My Resources</h2>
+            <canvas id="resourceChart"></canvas>
+            <input type="text" id="searchInput" class="search-input" placeholder="Search resources...">
+            <div id="categories"></div>
+        </div>
+        <div class="ai-insight-section">
+            <h3>AI Insight</h3>
+            <button class="btn btn-primary" onclick="alert('AI Insight - Integrating later!')">Get AI Insight</button>
+            <p id="aiInsightText">AI insights will appear here after integration.</p>
+        </div>
+    </div>
+    <script>
+        // ... (JavaScript remains unchanged) ...
+        const backIcon = document.getElementById("backIcon");
+        const tenantDropdown = document.getElementById("tenantDropdown");
+        const subscriptionDropdown = document.getElementById("subscriptionDropdown");
+        const searchInput = document.getElementById("searchInput");
+        const categoriesDiv = document.getElementById("categories");
+        let resources = [];
+        let chart = null;
+
+        backIcon.onclick = () => {
+            window.location.href = "/azure_landing";
+        };
+
+        function fetchAzureTenants() {
+            fetch('/api/azure/tenants/')
+                .then(res => res.json())
+                .then(data => {
+                    tenantDropdown.innerHTML = "";
+                    if (data.tenants && data.tenants.length) {
+                         data.tenants.forEach(tenant => {
+                            const opt = document.createElement("option");
+                            opt.value = tenant.tenant_id;
+                            opt.text = tenant.display_name || tenant.tenant_id;
+                            tenantDropdown.appendChild(opt);
+                        });
+                    } else {
+                         tenantDropdown.innerHTML = "<option>No tenants found</option>";
+                    }
+                }).catch(() => {
+                    tenantDropdown.innerHTML = "<option>Failed to fetch tenants</option>";
+                });
+        }
+
+        function fetchAzureSubscriptions() {
+            fetch('/api/azure/subscriptions/')
+                .then(res => res.json())
+                .then(data => {
+                    subscriptionDropdown.innerHTML = "";
+                    if (data.subscriptions && data.subscriptions.length) {
+                        data.subscriptions.forEach(sub => {
+                            const opt = document.createElement("option");
+                            opt.value = sub.subscription_id;
+                            opt.text = sub.display_name;
+                            subscriptionDropdown.appendChild(opt);
+                        });
+                        fetchResources(subscriptionDropdown.value);
+                    } else {
+                        subscriptionDropdown.innerHTML = "<option>No subscriptions found</option>";
+                    }
+                }).catch(() => {
+                    subscriptionDropdown.innerHTML = "<option>Failed to fetch subscriptions</option>";
+                });
+        }
+
+        function fetchResources(subscriptionId) {
+            if (!subscriptionId) return;
+            fetch(`/api/azure/resources/${subscriptionId}`)
+                .then(res => res.json())
+                .then(data => {
+                    resources = data.resources || [];
+                    renderResources(resources);
+                    renderChart(resources);
+                }).catch(() => {
+                    categoriesDiv.innerHTML = "<p>Failed to fetch resources</p>";
+                });
+        }
+
+        function renderResources(data) {
+            categoriesDiv.innerHTML = "";
+            const categories = categorizeResources(data);
+            for (const [category, items] of Object.entries(categories)) {
+                const categoryDiv = document.createElement("div");
+                categoryDiv.className = "category";
+                categoryDiv.innerHTML = `<h3>${category}</h3>`;
+                const table = document.createElement("table");
+                table.innerHTML = `
+                    <thead>
+                        <tr>
+                            <th onclick="sortTable('${category}', 'name')">Name <i class="fas fa-sort"></i></th>
+                            <th onclick="sortTable('${category}', 'type')">Type <i class="fas fa-sort"></i></th>
+                            <th onclick="sortTable('${category}', 'location')">Location <i class="fas fa-sort"></i></th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="${category}-body"></tbody>
+                `;
+                items.forEach(item => {
+                    const row = document.createElement("tr");
+                    row.innerHTML = `
+                        <td>${item.name}</td>
+                        <td>${item.type}</td>
+                        <td>${item.location}</td>
+                        <td>${item.status}</td>
+                    `;
+                    table.querySelector(`#${category}-body`).appendChild(row);
+                });
+                categoryDiv.appendChild(table);
+                categoriesDiv.appendChild(categoryDiv);
+            }
+        }
+
+        function categorizeResources(data) {
+            const categories = { Compute: [], Storage: [], Network: [], Database: [], Other: [] };
+            data.forEach(resource => {
+                const type = resource.type.toLowerCase();
+                if (type.includes('virtualmachines')) {
+                    categories.Compute.push(resource);
+                } else if (type.includes('storage')) {
+                    categories.Storage.push(resource);
+                } else if (type.includes('virtualnetworks') || type.includes('networkinterfaces')) {
+                    categories.Network.push(resource);
+                } else if (type.includes('sql') || type.includes('cosmosdb')) {
+                    categories.Database.push(resource);
+                } else {
+                    categories.Other.push(resource);
+                }
+            });
+            return categories;
+        }
+
+        function sortTable(category, key) {
+            const items = categorizeResources(resources)[category];
+            items.sort((a, b) => (a[key] > b[key] ? 1 : -1));
+            renderResources(resources);
+        }
+
+        function renderChart(data) {
+            const ctx = document.getElementById("resourceChart").getContext("2d");
+            const categoryCounts = Object.values(categorizeResources(data)).map(items => items.length);
+            const labels = ['Compute', 'Storage', 'Network', 'Database', 'Other'];
+            if (chart) chart.destroy();
+            chart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                         label: 'Resource Count',
+                        data: categoryCounts,
+                        backgroundColor: '#1565c0'
+                    }]
+                 },
+                options: {
+                    scales: {
+                        y: { beginAtZero: true }
+                    }
+                }
+            });
+        }
+
+        searchInput.oninput = function() {
+            const searchTerm = this.value.toLowerCase();
+            const filtered = resources.filter(resource => 
+                resource.name.toLowerCase().includes(searchTerm) ||
+                resource.type.toLowerCase().includes(searchTerm) ||
+                resource.location.toLowerCase().includes(searchTerm)
+            );
+            renderResources(filtered);
+            renderChart(filtered);
+        };
+
+        fetchAzureTenants();
+        fetchAzureSubscriptions();
+        subscriptionDropdown.onchange = () => fetchResources(subscriptionDropdown.value);
+    </script>
+</body>
+</html>

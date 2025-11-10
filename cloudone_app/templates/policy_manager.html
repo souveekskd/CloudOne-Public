@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CloudOne - Policy Manager</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/main.css">
+    <style>
+        .tab-bar { display: flex; border-bottom: 1px solid var(--color-border); margin-bottom: 20px; }
+        .tab-link { padding: 10px 20px; cursor: pointer; color: var(--color-text-muted); border-bottom: 3px solid transparent; font-size: 1.1em; }
+        .tab-link:hover { background: var(--color-background-light); }
+        .tab-link.active { color: var(--color-primary); border-bottom: 3px solid var(--color-primary-dark); }
+        .tab-pane { display: none; }
+        .tab-pane.active { display: block; }
+        
+        .policy-card {
+            background: var(--color-background-medium);
+            border: 1px solid var(--color-border);
+            border-radius: 8px;
+            padding: 15px 20px;
+            margin-bottom: 10px;
+        }
+        .policy-card h4 { margin: 0 0 10px 0; color: var(--color-primary); }
+        .policy-card code {
+            font-size: 0.9em; color: var(--color-text-secondary); display: block;
+            margin-top: 5px; background: var(--color-background-light); padding: 5px; border-radius: 4px;
+        }
+        .mode-DoNotEnforce { background: #4a4a4a; color: #eee; }
+        .mode-Default { background: var(--color-danger); color: white; }
+        .policy-badge { padding: 3px 8px; border-radius: 5px; font-size: 0.85em; font-weight: bold; margin-left: 10px; }
+        
+        /* New Editor for Tab 3 */
+        #customPolicyEditor {
+            width: 100%;
+            height: 400px;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 0.9em;
+            background: #1E1E1E;
+            color: #D4D4D4;
+            border: 1px solid var(--color-border);
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <i class="fas fa-arrow-left header-icon" id="backIcon"></i>
+        <div class="dropdown-group">
+            <label>Tenant:</label>
+            <select id="tenantDropdown"><option>Loading...</option></select>
+            <label>Subscription:</label>
+            <select id="subscriptionDropdown"><option>Loading...</option></select>
+        </div>
+    </div>
+    <div class="content">
+        <h2>Policy Checker & Generator</h2>
+        
+        <div class="tab-bar">
+            <span class="tab-link active" onclick="openTab(event, 'Implemented')"><i class="fas fa-list-check"></i> Implemented Policy</span>
+            <span class="tab-link" onclick="openTab(event, 'CAF')"><i class="fas fa-shield-alt"></i> CAF Policy Library</span>
+            <span class="tab-link" onclick="openTab(event, 'Custom')"><i class="fas fa-pen-ruler"></i> Custom Policy Generator</span>
+        </div>
+
+        <div id="Implemented" class="tab-pane active">
+            <h3>Current Policy Assignments</h3>
+            <div id="assignmentsContainer"><p class="loading-text">Loading...</p></div>
+        </div>
+
+        <div id="CAF" class="tab-pane">
+            <h3>CAF / ALZ Policy Library</h3>
+            <div id="cafContainer"><p class="loading-text">Loading...</p></div>
+        </div>
+        
+        <div id="Custom" class="tab-pane">
+            <h3>Custom Policy Initiative</h3>
+            <p>Use this template to define a custom initiative. The "Apply" button will be enabled in a future update.</p>
+            <textarea id="customPolicyEditor"></textarea>
+            <button class="btn btn-primary" style="margin-top: 10px;" onclick="alert('Apply Custom Policy feature coming soon!')">Apply Custom Policy</button>
+        </div>
+    </div>
+
+    <div id="applyPolicyModal" class="modal-overlay">
+        <div class="modal-content">
+            <span class="close" id="modalCloseBtn">&times;</span>
+            <h3 style="color: var(--color-primary);">Apply Policy</h3>
+            <p id="applyPolicyName" style="font-weight: bold;"></p>
+            
+            <div class="form-group">
+                <label for="assignmentScope">Assignment Scope</label>
+                <input type="text" id="assignmentScope" placeholder="/subscriptions/YOUR_SUB_ID/resourceGroups/YOUR_RG">
+                <small style="color: var(--color-text-muted);">Assign to the current Subscription, or a Resource Group within it.</small>
+            </div>
+            
+            <div class="form-group">
+                <label>Enforcement Mode</label>
+                <div class="radio-group">
+                    <input type="radio" id="modeAudit" name="enforcement_mode" value="DoNotEnforce" checked>
+                    <label for="modeAudit">Audit (DoNotEnforce)</label>
+                    <input type="radio" id="modeEnforce" name="enforcement_mode" value="Default">
+                    <label for="modeEnforce">Enforce (Default)</label>
+                </div>
+            </div>
+            
+            <input type="hidden" id="policyDefinitionId_hidden">
+            <button id="btnDeployPolicy" class="btn btn-primary" style="width: 100%;">Apply Policy</button>
+            <p id="applyStatus" class="loading-text" style="display: none;"></p>
+        </div>
+    </div>
+
+    <script>
+        const backIcon = document.getElementById("backIcon");
+        const tenantDropdown = document.getElementById("tenantDropdown");
+        const subscriptionDropdown = document.getElementById("subscriptionDropdown");
+        
+        const assignmentsContainer = document.getElementById("assignmentsContainer");
+        const cafContainer = document.getElementById("cafContainer");
+        const customPolicyEditor = document.getElementById("customPolicyEditor");
+
+        // --- NEW Modal Consts ---
+        const applyModal = document.getElementById("applyPolicyModal");
+        const modalCloseBtn = document.getElementById("modalCloseBtn");
+        const btnDeployPolicy = document.getElementById("btnDeployPolicy");
+        const applyPolicyName = document.getElementById("applyPolicyName");
+        const assignmentScope = document.getElementById("assignmentScope");
+        const policyDefinitionId_hidden = document.getElementById("policyDefinitionId_hidden");
+        const applyStatus = document.getElementById("applyStatus");
+
+        // --- Custom Policy Template ---
+        const policyInitiativeTemplate = `{
+  "properties": {
+    "displayName": "My Custom Initiative",
+    "description": "A bundle of custom and built-in policies.",
+    "parameters": {},
+    "policyDefinitions": [
+      {
+        "policyDefinitionId": "/providers/Microsoft.Authorization/policyDefinitions/e56962a6-4747-49cd-b67b-bf8b01975c4c",
+        "parameters": {
+          "listOfAllowedLocations": { "value": "[parameters('initiative_allowedLocations')]" }
+        }
+      }
+    ]
+  }
+}`;
+        customPolicyEditor.value = policyInitiativeTemplate;
+
+
+        backIcon.onclick = () => { window.location.href = "/azure_landing"; };
+
+        function fetchAzureTenants() { /* ... (Same as before) ... */ }
+        function fetchAzureSubscriptions() { /* ... (Same as before) ... */ }
+        
+        function loadAllPolicyData(subscriptionId) {
+            if (!subscriptionId) return;
+            // Set default scope in the modal
+            assignmentScope.value = `/subscriptions/${subscriptionId}`;
+            
+            fetchPolicyAssignments(subscriptionId);
+            fetchCafPolicies();
+        }
+
+        // --- Logic for Tab 1 ---
+        function fetchPolicyAssignments(subscriptionId) {
+            assignmentsContainer.innerHTML = `<p class="loading-text">Fetching current policy assignments...</p>`;
+            fetch(`/api/azure/policy/assignments/${subscriptionId}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.error) throw new Error(data.error);
+                    renderPolicyAssignments(data.assignments);
+                })
+                .catch(err => {
+                    assignmentsContainer.innerHTML = `<p class="error">Failed to fetch assignments: ${err.message}</p>`;
+                });
+        }
+        
+        function renderPolicyAssignments(assignments) {
+            if (assignments.length === 0) {
+                assignmentsContainer.innerHTML = "<p>No policy assignments found for this subscription.</p>";
+                return;
+            }
+            assignmentsContainer.innerHTML = assignments.map(a => `
+                <div class="policy-card">
+                    <h4>
+                        ${a.display_name}
+                        <span class="policy-badge mode-${a.mode}">${a.mode}</span>
+                    </h4>
+                    <small>Scope: <code>${a.scope}</code></small>
+                    <small>Definition: <code>${a.policy_definition_id}</code></small>
+                </div>
+            `).join('');
+        }
+        
+        // --- Logic for Tab 2 ---
+        function fetchCafPolicies() {
+            cafContainer.innerHTML = `<p class="loading-text">Fetching CAF policy library...</p>`;
+            fetch(`/api/azure/policy/caf_initiatives`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.error) throw new Error(data.error);
+                    renderCafPolicies(data.caf_policies);
+                })
+                .catch(err => {
+                    cafContainer.innerHTML = `<p class="error">Failed to fetch CAF library: ${err.message}</p>`;
+                });
+        }
+        
+        function renderCafPolicies(policies) {
+            cafContainer.innerHTML = policies.map(p => `
+                <div class="policy-card">
+                    <h4>${p.display_name}</h4>
+                    <p>${p.description}</p>
+                    <small>Definition ID: <code>${p.definition_id}</code></small>
+                    <div style="margin-top: 10px;">
+                        <button class="btn btn-primary" onclick="openApplyModal('${p.display_name}', '${p.definition_id}')">Apply</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // --- Tabbed Interface ---
+        function openTab(evt, tabName) {
+            let i, tabcontent, tablinks;
+            tabcontent = document.getElementsByClassName("tab-pane");
+            for (i = 0; i < tabcontent.length; i++) {
+                tabcontent[i].style.display = "none";
+            }
+            tablinks = document.getElementsByClassName("tab-link");
+            for (i = 0; i < tablinks.length; i++) {
+                tablinks[i].className = tablinks[i].className.replace(" active", "");
+            }
+            document.getElementById(tabName).style.display = "block";
+            evt.currentTarget.className += " active";
+        }
+        
+        // --- NEW MODAL LOGIC ---
+        function openApplyModal(policyName, definitionId) {
+            applyPolicyName.textContent = `Apply: ${policyName}`;
+            policyDefinitionId_hidden.value = definitionId;
+            applyStatus.style.display = "none";
+            applyModal.style.display = "flex";
+        }
+        
+        modalCloseBtn.onclick = () => { applyModal.style.display = "none"; };
+        window.onclick = (event) => {
+            if (event.target == applyModal) {
+                applyModal.style.display = "none";
+            }
+        };
+
+        btnDeployPolicy.onclick = () => {
+            const payload = {
+                subscription_id: subscriptionDropdown.value,
+                policy_definition_id: policyDefinitionId_hidden.value,
+                assignment_scope: assignmentScope.value,
+                enforcement_mode: document.querySelector('input[name="enforcement_mode"]:checked').value,
+                policy_name: applyPolicyName.textContent.replace("Apply: ", "")
+            };
+
+            if (!payload.assignment_scope) {
+                alert("Please specify an assignment scope.");
+                return;
+            }
+
+            applyStatus.textContent = "Applying policy...";
+            applyStatus.className = "loading-text";
+            applyStatus.style.display = "block";
+            
+            fetch('/api/azure/policy/create_assignment', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                applyStatus.textContent = `Successfully applied policy: ${data.displayName}`;
+                applyStatus.className = "success-text"; // You can style this
+                // Refresh Tab 1
+                fetchPolicyAssignments(subscriptionDropdown.value);
+            })
+            .catch(err => {
+                applyStatus.textContent = `Error: ${err.message}`;
+                applyStatus.className = "error";
+            });
+        };
+
+        // --- Initial Load ---
+        fetchAzureTenants();
+        fetchAzureSubscriptions();
+        subscriptionDropdown.onchange = () => loadAllPolicyData(subscriptionDropdown.value);
+        
+        // (Copy/paste fetchAzureTenants and fetchAzureSubscriptions from another file)
+        function fetchAzureTenants() {
+            fetch('/api/azure/tenants/').then(res => res.json()).then(data => {
+                tenantDropdown.innerHTML = "";
+                data.tenants.forEach(tenant => {
+                    const opt = document.createElement("option");
+                    opt.value = tenant.tenant_id;
+                    opt.text = tenant.display_name || tenant.tenant_id;
+                    tenantDropdown.appendChild(opt);
+                });
+            }).catch(() => tenantDropdown.innerHTML = "<option>Failed to fetch</option>");
+        }
+
+        function fetchAzureSubscriptions() {
+            fetch('/api/azure/subscriptions/').then(res => res.json()).then(data => {
+                subscriptionDropdown.innerHTML = "";
+                data.subscriptions.forEach(sub => {
+                    const opt = document.createElement("option");
+                    opt.value = sub.subscription_id;
+                    opt.text = sub.display_name;
+                    subscriptionDropdown.appendChild(opt);
+                });
+                loadAllPolicyData(subscriptionDropdown.value);
+            }).catch(() => subscriptionDropdown.innerHTML = "<option>Failed to fetch</option>");
+        }
+    </script>
+</body>
+</html>

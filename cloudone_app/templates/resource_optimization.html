@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CloudOne - Resource Optimization</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/main.css">
+    <style>
+        /* --- Tab Styles --- */
+        .tab-bar { 
+            display: flex; 
+            border-bottom: 1px solid var(--color-border); 
+            margin-bottom: 20px; 
+        }
+        .tab-link { 
+            padding: 10px 20px; 
+            cursor: pointer; 
+            color: var(--color-text-muted); 
+            border-bottom: 3px solid transparent; 
+            font-size: 1.1em; 
+        }
+        .tab-link:hover { background: var(--color-background-light); }
+        .tab-link.active { 
+            color: var(--color-primary); 
+            border-bottom: 3px solid var(--color-primary-dark); 
+        }
+        .tab-pane { display: none; }
+        .tab-pane.active { display: block; }
+        .savings { 
+            color: #4caf50; 
+            font-weight: bold; 
+        }
+
+        /* --- Modal Styles (Copied) --- */
+        .modal-overlay {
+            display: none; 
+            position: fixed; 
+            z-index: 1000; 
+            left: 0; top: 0;
+            width: 100%; height: 100%;
+            overflow: auto; 
+            background-color: rgba(0,0,0,0.8); 
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-body { 
+            margin-top: 20px; 
+            white-space: pre-wrap; 
+            font-family: 'Segoe UI', sans-serif; 
+            line-height: 1.6; 
+            max-height: 60vh; 
+            overflow-y: auto; 
+        }
+        .modal-body code { 
+            background: #111; 
+            padding: 2px 5px; 
+            border-radius: 4px; 
+            font-family: 'Courier New', Courier, monospace; 
+        }
+        .modal-body pre { 
+            background: #111; 
+            padding: 10px; 
+            border-radius: 5px; 
+            overflow-x: auto; 
+        }
+        .remediate-btn {
+            background: var(--color-primary-dark);
+            color: var(--color-text-primary);
+        }
+        .remediate-btn:hover { background: var(--color-primary-dark-hover); }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <i class="fas fa-arrow-left header-icon" id="backIcon"></i>
+        <div class="dropdown-group">
+            <label>Tenant:</label>
+            <select id="tenantDropdown"><option>Loading...</option></select>
+            <label>Subscription:</label>
+            <select id="subscriptionDropdown"><option>Loading...</option></select>
+        </div>
+    </div>
+    <div class="content">
+        <h2>Resource Optimization</h2>
+        
+        <div class="tab-bar">
+            <span class="tab-link active" onclick="openTab(event, 'Cost')"><i class="fas fa-dollar-sign"></i> Cost</span>
+            <span class="tab-link" onclick="openTab(event, 'Performance')"><i class="fas fa-tachometer-alt"></i> Performance</span>
+        </div>
+
+        <div id="Cost" class="tab-pane active">
+            <h3>Cost Optimization Recommendations</h3>
+            <div id="costContainer"><p class="loading-text">Loading...</p></div>
+        </div>
+
+        <div id="Performance" class="tab-pane">
+            <h3>Performance Optimization Recommendations</h3>
+            <div id="performanceContainer"><p class="loading-text">Loading...</p></div>
+        </div>
+    </div>
+
+    <div id="remediationModal" class="modal-overlay">
+        <div class="modal-content">
+            <span class="close" id="modalCloseBtn">&times;</span>
+            <h3 style="color: var(--color-primary);">AI Remediation Steps</h3>
+            <div class="modal-body" id="modalBody">
+                <p class="loading-text">AI is generating remediation steps...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const backIcon = document.getElementById("backIcon");
+        const tenantDropdown = document.getElementById("tenantDropdown");
+        const subscriptionDropdown = document.getElementById("subscriptionDropdown");
+        
+        const costContainer = document.getElementById("costContainer");
+        const performanceContainer = document.getElementById("performanceContainer");
+        
+        const modal = document.getElementById("remediationModal");
+        const modalBody = document.getElementById("modalBody");
+        const modalCloseBtn = document.getElementById("modalCloseBtn");
+
+        backIcon.onclick = () => { window.location.href = "/azure_landing"; };
+
+        function fetchAzureTenants() {
+            fetch('/api/azure/tenants/').then(res => res.json()).then(data => {
+                tenantDropdown.innerHTML = "";
+                data.tenants.forEach(tenant => {
+                    const opt = document.createElement("option");
+                    opt.value = tenant.tenant_id;
+                    opt.text = tenant.display_name || tenant.tenant_id;
+                    tenantDropdown.appendChild(opt);
+                });
+            }).catch(() => tenantDropdown.innerHTML = "<option>Failed to fetch</option>");
+        }
+
+        function fetchAzureSubscriptions() {
+            fetch('/api/azure/subscriptions/').then(res => res.json()).then(data => {
+                subscriptionDropdown.innerHTML = "";
+                data.subscriptions.forEach(sub => {
+                    const opt = document.createElement("option");
+                    opt.value = sub.subscription_id;
+                    opt.text = sub.display_name;
+                    subscriptionDropdown.appendChild(opt);
+                });
+                fetchAllRecommendations(subscriptionDropdown.value);
+            }).catch(() => subscriptionDropdown.innerHTML = "<option>Failed to fetch</option>");
+        }
+        
+        function fetchAllRecommendations(subscriptionId) {
+            if (!subscriptionId) return;
+            
+            costContainer.innerHTML = `<p class="loading-text">Fetching cost recommendations...</p>`;
+            performanceContainer.innerHTML = `<p class="loading-text">Fetching performance recommendations...</p>`;
+
+            // Fetch Cost
+            fetch(`/api/azure/advisor/recommendations/${subscriptionId}/Cost`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.error) throw new Error(data.error);
+                    renderTable(costContainer, data.recommendations, true);
+                })
+                .catch(err => {
+                    costContainer.innerHTML = `<p class="error">Failed to fetch cost recommendations: ${err.message}</p>`;
+                });
+            
+            // Fetch Performance
+            fetch(`/api/azure/advisor/recommendations/${subscriptionId}/Performance`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.error) throw new Error(data.error);
+                    renderTable(performanceContainer, data.recommendations, false);
+                })
+                .catch(err => {
+                    performanceContainer.innerHTML = `<p class="error">Failed to fetch performance recommendations: ${err.message}</p>`;
+                });
+        }
+
+        function renderTable(container, recs, isCostTab) {
+            if (recs.length === 0) {
+                container.innerHTML = "<p>No recommendations found for this category.</p>";
+                return;
+            }
+
+            const table = document.createElement("table");
+            let headers = `
+                <th>Impact</th>
+                <th>Description</th>
+                <th>Resource</th>
+                <th>Resource Group</th>
+                <th>AI Help</th>
+            `;
+            // Add Savings column only for the Cost tab
+            if (isCostTab) {
+                headers = `<th>Potential Savings</th>` + headers;
+            }
+
+            table.innerHTML = `
+                <thead><tr>${headers}</tr></thead>
+                <tbody>
+                    ${recs.map(rec => {
+                        const escapedDesc = rec.description.replace(/'/g, "\\'").replace(/"/g, "&quot;");
+                        let costCell = '';
+                        if (isCostTab) {
+                            costCell = `<td class="savings">$${rec.potential_savings} ${rec.savings_currency}</td>`;
+                        }
+                        
+                        return `
+                            <tr>
+                                ${costCell}
+                                <td class="impact-${rec.impact}">${rec.impact}</td>
+                                <td>${rec.description}</td>
+                                <td>${rec.impacted_resource}</td>
+                                <td>${rec.resource_group}</td>
+                                <td>
+                                    <button class="btn remediate-btn" onclick="showRemediation('${escapedDesc}')">
+                                        <i class="fas fa-robot"></i> AI Remediate
+                                    </button>
+                                </td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            `;
+            container.innerHTML = "";
+            container.appendChild(table);
+        }
+
+        // --- Tabbed Interface ---
+        function openTab(evt, tabName) {
+            let i, tabcontent, tablinks;
+            tabcontent = document.getElementsByClassName("tab-pane");
+            for (i = 0; i < tabcontent.length; i++) {
+                tabcontent[i].style.display = "none";
+            }
+            tablinks = document.getElementsByClassName("tab-link");
+            for (i = 0; i < tablinks.length; i++) {
+                tablinks[i].className = tablinks[i].className.replace(" active", "");
+            }
+            document.getElementById(tabName).style.display = "block";
+            evt.currentTarget.className += " active";
+        }
+
+        // --- AI Remediation Modal Functions (Re-used) ---
+        function showRemediation(description) {
+            modal.style.display = "flex";
+            modalBody.innerHTML = '<p class="loading-text">AI is generating remediation steps...</p>';
+            
+            fetch('/api/ai/remediate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ "problem_description": description })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) {
+                    modalBody.innerHTML = `<p class="error">Error: ${data.error}</p>`;
+                } else {
+                    modalBody.innerHTML = formatMarkdown(data.remediation_steps);
+                }
+            })
+            .catch(err => {
+                modalBody.innerHTML = `<p class="error">Network error: ${err.message}</p>`;
+            });
+        }
+
+        modalCloseBtn.onclick = () => { modal.style.display = "none"; };
+        window.onclick = (event) => {
+            if (event.target == modal) { modal.style.display = "none"; }
+        };
+        
+        function formatMarkdown(text) {
+            let html = text
+                .replace(/```([\s\S]*?)```/g, (match, p1) => `<pre><code>${p1.trim().replace(/</g, "&lt;").replace(/>/g, "&gt;")}</code></pre>`)
+                .replace(/`([^`]+)`/g, (match, p1) => `<code>${p1}</code>`)
+                .replace(/^\s*[\*+-]\s+(.*)/gm, '<li>$1</li>')
+                .replace(/(\<\/li\>li\>)/g, '</li><li>').replace(/(\<\/li\>\n<li\>)/g, '</li><li>')
+                .replace(/(\<li\>.*<\/li\>)/gs, (match, p1) => `<ul>${p1}</ul>`)
+                .replace(/^\s*\d+\.\s+(.*)/gm, '<li>$1</li>')
+                .replace(/(\<\/li\>li\>)/g, '</li><li>')
+                .replace(/(\<li\>.*<\/li\>)/gs, (match, p1) => `<ol>${p1}</ol>`)
+                .replace(/\n/g, '<br>');
+            
+            return html.replace(/(\<br\>)?\s*\<ul\>/g, '<ul>').replace(/\<\/ul\>(\<br\>)?/g, '</ul>')
+                       .replace(/(\<br\>)?\s*\<ol\>/g, '<ol>').replace(/\<\/ol\>(\<br\>)?/g, '</ol>');
+        }
+        
+        // --- Initial Load ---
+        fetchAzureTenants();
+        fetchAzureSubscriptions();
+        subscriptionDropdown.onchange = () => fetchAllRecommendations(subscriptionDropdown.value);
+    </script>
+</body>
+</html>

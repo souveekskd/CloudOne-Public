@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CloudOne - Azure Dashboard</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="/static/css/main.css">
+    
+    <style>
+        /* Page-specific styles for alert widget */
+        .alert-item {
+            padding: 10px 0;
+            border-bottom: 1px solid var(--color-border);
+        }
+        .alert-item:last-child { border-bottom: none; }
+        .alert-item .alert-level-High { color: var(--color-danger); font-weight: bold;}
+        .alert-item .alert-level-Medium { color: var(--color-impact-medium); }
+        .alert-item .alert-desc { font-size: 0.95em; margin: 5px 0 0 0; }
+        .alert-item .alert-resource { font-size: 0.8em; color: var(--color-text-muted); }
+
+        /* Helper to get color based on score */
+        .score-red { color: var(--color-danger); }
+        .score-orange { color: var(--color-impact-medium); }
+        .score-green { color: #4caf50; }
+        .score-blue { color: #2196f3; }
+        .score-purple { color: #9c27b0; }
+        .score-muted { color: var(--color-text-muted); }
+    </style>
+</head>
+<body>
+
+    <div class="dashboard-layout">
+        <nav class="sidebar">
+            <div class="sidebar-header">
+                CloudOne
+            </div>
+            <ul class="sidebar-nav">
+                <li><a href="/azure_landing" class="active"><i class="fas fa-home"></i> Dashboard</a></li>
+                <li><a href="/my_resources"><i class="fas fa-server"></i> My Resources</a></li>
+                <li><a href="/resource_optimization"><i class="fas fa-tachometer-alt"></i> Optimization</a></li>
+                <li><a href="/carbon_footprint"><i class="fas fa-leaf"></i> Carbon Footprint</a></li>
+                <li><a href="/orphaned_resources"><i class="fas fa-magnifying-glass"></i> Orphan Finder</a></li>
+                <li><a href="/environment_security_score"><i class="fas fa-shield-halved"></i> Environment Score</a></li>
+                <li><a href="/policy_manager"><i class="fas fa-file-contract"></i> Policy Manager</a></li>
+                <li><a href="/migration_bot"><i class="fas fa-robot"></i> Migration Bot</a></li>
+                <li><a href="/terraform_generator"><i class="fas fa-cogs"></i> IaC Generator</a></li>
+                <li><a href="/smart_monitoring"><i class="fas fa-bolt"></i> Smart monitoring</a></li>
+                <li><a href="#"><i class="fas fa-wrench"></i> Quick Heal</a></li>
+                <li><a href="#"><i class="fas fa-dollar-sign"></i> Cost Center</a></li>
+                <li><a href="#"><i class="fas fa-code-branch"></i> Code & Pipelines</a></li>
+                <li><a href="/cloud_providers"><i class="fas fa-arrow-left"></i> Back to Clouds</a></li>
+            </ul>
+        </nav>
+
+        <main class="dashboard-main">
+            <div class="header">
+                <i class="fas fa-bars header-icon" id="menuIcon"></i> <div class="dropdown-group">
+                    <label>Tenant:</label>
+                    <select id="tenantDropdown"><option>Loading...</option></select>
+                    <label>Subscription:</label>
+                    <select id="subscriptionDropdown"><option>Loading...</option></select>
+                </div>
+            </div>
+
+            <div class="content">
+                <div class="dashboard-grid">
+
+                    <div class="widget widget-env-score">
+                        <div class="env-score-main" id="widget-score-main">
+                            <p class="loading-text">Loading...</p>
+                        </div>
+                        <div class="env-score-pillars" id="widget-score-pillars">
+                            </div>
+                    </div>
+
+                    <div class="widget widget-kpis">
+                        <div id="widget-kpi-carbon"><p class="loading-text">Loading...</p></div>
+                        <div id="widget-kpi-orphans"><p class="loading-text">Loading...</p></div>
+                    </div>
+
+                    <div class="widget widget-insights">
+                        <h3 class="widget-title">Actionable Insights</h3>
+                        <div class="insights-grid" id="widget-insights-grid">
+                            <p class="loading-text">Loading...</p>
+                        </div>
+                    </div>
+
+                    <div class="widget widget-chart">
+                        <h3 class="widget-title">Resource Inventory</h3>
+                        <div id="widget-resource-chart" class="loading-text" style="height: 300px;">
+                            Loading chart...
+                        </div>
+                    </div>
+                    
+                    <div class="widget widget-alerts">
+                        <h3 class="widget-title">Monitoring Alerts</h3>
+                        <div id="widget-monitoring-alerts" class="loading-text">Loading alerts...</div>
+                    </div>
+
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const tenantDropdown = document.getElementById("tenantDropdown");
+        const subscriptionDropdown = document.getElementById("subscriptionDropdown");
+        let resourceChart = null; // Hold chart instance
+
+        // --- Helper function to get color based on score ---
+        const getScoreColor = (score) => {
+            if (score >= 90) return 'score-green';
+            if (score >= 70) return 'score-orange';
+            if (score > 0) return 'score-red';
+            return 'score-muted';
+        };
+
+        // --- Data Fetching ---
+
+        function fetchAzureTenants() {
+            fetch('/api/azure/tenants/')
+                .then(res => res.json())
+                .then(data => {
+                    tenantDropdown.innerHTML = "";
+                    if (data.tenants && data.tenants.length) {
+                         data.tenants.forEach(tenant => {
+                            const opt = document.createElement("option");
+                            opt.value = tenant.tenant_id;
+                            opt.text = tenant.display_name || tenant.tenant_id;
+                            tenantDropdown.appendChild(opt);
+                        });
+                    } else {
+                         tenantDropdown.innerHTML = "<option>No tenants found</option>";
+                    }
+             }).catch(() => tenantDropdown.innerHTML = "<option>Failed to fetch tenants</option>");
+        }
+
+        function fetchAzureSubscriptions() {
+            fetch('/api/azure/subscriptions/')
+                .then(res => res.json())
+                .then(data => {
+                    subscriptionDropdown.innerHTML = "";
+                    if (data.subscriptions && data.subscriptions.length) {
+                        data.subscriptions.forEach(sub => {
+                            const opt = document.createElement("option");
+                            opt.value = sub.subscription_id;
+                            opt.text = sub.display_name;
+                            subscriptionDropdown.appendChild(opt);
+                        });
+                        fetchDashboardData(subscriptionDropdown.value);
+                    } else {
+                         subscriptionDropdown.innerHTML = "<option>No subscriptions found</option>";
+                    }
+                })
+                .catch(() => subscriptionDropdown.innerHTML = "<option>Failed to fetch subscriptions</option>");
+        }
+
+        /**
+         * Main data function. Calls the aggregator API.
+         */
+        function fetchDashboardData(subscriptionId) {
+            if (!subscriptionId) return;
+
+            // Set all widgets to loading state
+            document.getElementById("widget-score-main").innerHTML = `<p class="loading-text">Loading...</p>`;
+            document.getElementById("widget-score-pillars").innerHTML = ``;
+            document.getElementById("widget-kpi-carbon").innerHTML = `<p class="loading-text">Loading...</p>`;
+            document.getElementById("widget-kpi-orphans").innerHTML = `<p class="loading-text">Loading...</p>`;
+            document.getElementById("widget-insights-grid").innerHTML = `<p class="loading-text">Loading...</p>`;
+            document.getElementById("widget-resource-chart").innerHTML = `<p class="loading-text">Loading chart...</p>`;
+            document.getElementById("widget-monitoring-alerts").innerHTML = `<p class="loading-text">Loading alerts...</p>`;
+            if (resourceChart) resourceChart.destroy();
+
+            // This single fetch runs all API calls in parallel on the backend
+            fetch(`/api/azure/dashboard/${subscriptionId}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.error) throw new Error(data.error);
+                    
+                    // --- Render all widgets ---
+                    renderWafScores(data.waf_scores);
+                    renderKpis(data.kpis);
+                    renderInsights(data.insights);
+                    renderResourceChart(data.resource_counts);
+                    renderMonitoringAlerts(data.monitoring_alerts);
+                })
+                .catch(err => {
+                    // Handle error state for all widgets
+                    document.getElementById("widget-score-main").innerHTML = `<p class="error">Error</p>`;
+                    document.getElementById("widget-kpi-carbon").innerHTML = `<p class="error">Error</p>`;
+                    document.getElementById("widget-kpi-orphans").innerHTML = `<p class="error">Error</p>`;
+                    document.getElementById("widget-insights-grid").innerHTML = `<p class="error">Failed to load: ${err.message}</p>`;
+                    document.getElementById("widget-resource-chart").innerHTML = `<p class="error">Error</p>`;
+                    document.getElementById("widget-monitoring-alerts").innerHTML = `<p class="error">Error</p>`;
+                });
+        }
+
+        // --- Widget Rendering Functions ---
+
+        function renderWafScores(scores) {
+            const mainContainer = document.getElementById("widget-score-main");
+            const pillarsContainer = document.getElementById("widget-score-pillars");
+            
+            // This is your requested "Security only" (but done better)
+            const secScore = scores.security?.score || 0;
+            const secColor = getScoreColor(secScore);
+            mainContainer.innerHTML = `
+                <a href="/environment_security_score" style="text-decoration: none;">
+                    <div class="score-value ${secColor}">${secScore}%</div>
+                    <div class="score-label">Security Score</div>
+                </a>
+            `;
+            
+            // This is the correct context you must not hide
+            const createPillarItem = (label, pillar, color) => {
+                const score = scores[pillar]?.score || 0;
+                return `
+                    <div class="pillar-item">
+                        <a href="/environment_security_score" style="text-decoration: none;">
+                            <span class="score-value ${color}">${score}%</span>
+                            <span class="score-label">${label}</span>
+                        </a>
+                    </div>
+                `;
+            };
+            pillarsContainer.innerHTML = `
+                ${createPillarItem('Cost', 'cost', 'score-green')}
+                ${createPillarItem('Reliability', 'reliability', 'score-blue')}
+                ${createPillarItem('Performance', 'performance', 'score-purple')}
+                ${createPillarItem('Ops Excellence', 'operationalexcellence', 'score-orange')}
+            `;
+        }
+
+        function renderKpis(kpis) {
+            const carbonContainer = document.getElementById("widget-kpi-carbon");
+            const orphanContainer = document.getElementById("widget-kpi-orphans");
+
+            // Carbon KPI
+            carbonContainer.innerHTML = `
+                <a href="/carbon_footprint" class="kpi-card">
+                    <div class="kpi-card-icon co2"><i class="fas fa-leaf"></i></div>
+                    <div class="kpi-card-info">
+                        <div class="kpi-value">${(kpis.carbon?.total_emissions || 0).toFixed(0)}</div>
+                        <div class="kpi-label">kgCO2e (Monthly)</div>
+                    </div>
+                </a>
+            `;
+            
+            // Orphan KPI
+            orphanContainer.innerHTML = `
+                <a href="/orphaned_resources" class="kpi-card">
+                    <div class="kpi-card-icon orphan"><i class="fas fa-magnifying-glass"></i></div>
+                    <div class="kpi-card-info">
+                        <div class="kpi-value">${kpis.orphans?.count || 0}</div>
+                        <div class="kpi-label">Orphaned Resources</div>
+                    </div>
+                </a>
+            `;
+        }
+
+        function renderInsights(insights) {
+            const container = document.getElementById("widget-insights-grid");
+
+            const createInsightCard = (label, iconClass, data, link) => {
+                return `
+                    <a href="${link}" class="insight-card">
+                        <div class="insight-icon ${iconClass}"><i class="fas ${iconClass}"></i></div>
+                        <div class="insight-count">${data.count}</div>
+                        <div class="insight-label">${label}</div>
+                        <div class="insight-top-item">${data.top_item}</div>
+                    </a>
+                `;
+            };
+
+            container.innerHTML = `
+                ${createInsightCard('Cost', 'fa-dollar-sign cost', insights.Cost, '/resource_optimization')}
+                ${createInsightCard('Security', 'fa-shield-halved security', insights.Security, '/environment_security_score')}
+                ${createInsightCard('Reliability', 'fa-server reliability', insights.Reliability, '/environment_security_score')}
+            `;
+        }
+
+        function renderResourceChart(counts) {
+            const container = document.getElementById("widget-resource-chart");
+            container.innerHTML = `<canvas id="resourceChartCanvas"></canvas>`;
+            const ctx = document.getElementById("resourceChartCanvas").getContext("2d");
+            
+            if (resourceChart) resourceChart.destroy();
+
+            // This is the "more attractive" chart
+            resourceChart = new Chart(ctx, {
+                type: 'doughnut', // Changed from 'bar'
+                data: {
+                    labels: Object.keys(counts),
+                    datasets: [{
+                        label: 'Resource Count',
+                        data: Object.values(counts),
+                        backgroundColor: [ // Add more colors
+                            '#1565c0', '#74bcff', '#f57c00', '#4caf50', '#9c27b0'
+                        ],
+                        borderColor: '#222', // Border for segments
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { color: '#aaa' }
+                        }
+                    }
+                }
+            });
+        }
+        
+        function renderMonitoringAlerts(alerts) {
+            const container = document.getElementById("widget-monitoring-alerts");
+            if (!alerts || alerts.length === 0) {
+                container.innerHTML = "<p>No active monitoring alerts found.</p>";
+                return;
+            }
+            
+            container.innerHTML = `
+                <ul class="insights-list">
+                    ${alerts.slice(0, 3).map(item => `
+                        <li class="alert-item">
+                            <a href="/smart_monitoring" style="text-decoration: none;">
+                                <span class="alert-level-${item.alertLevel}">
+                                    <i class="fas fa-bell"></i> ${item.alertLevel} Alert
+                                </span>
+                                <p class="alert-desc">${item.alertReason}</p>
+                                <div class="alert-resource">${item.name} (${item.type.split('/').pop()})</div>
+                            </a>
+                        </li>
+                    `).join('')}
+                </ul>
+            `;
+            if (alerts.length > 3) {
+                container.innerHTML += `<a href="/smart_monitoring" style="font-size: 0.9em; margin-top: 10px; display: inline-block;">See all ${alerts.length} alerts...</a>`;
+            }
+        }
+
+        // --- Initial Load ---
+        fetchAzureTenants();
+        fetchAzureSubscriptions();
+        subscriptionDropdown.onchange = () => fetchDashboardData(subscriptionDropdown.value);
+    </script>
+</body>
+</html>

@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CloudOne - Carbon Footprint</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/main.css">
+    <style>
+        /* Page-specific styles for metric cards */
+        .metric-value {
+            font-size: 2.5em; 
+            font-weight: bold; 
+            margin-bottom: 10px;
+        }
+        .metric-title {
+            font-size: 0.9em; 
+            color: #ccc;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <i class="fas fa-arrow-left header-icon" id="backIcon"></i>
+        <div class="dropdown-group">
+            <label>Tenant:</label>
+            <select id="tenantDropdown"><option>Loading...</option></select>
+            <label>Subscription:</label>
+            <select id="subscriptionDropdown"><option>Loading...</option></select>
+        </div>
+    </div>
+    <div class="content">
+        <h2>Cloud Carbon Footprint</h2>
+        <p style="color: var(--color-text-secondary); max-width: 800px;">
+            This report shows the latest available monthly carbon emissions summary for the selected subscription, as reported by the Azure Carbon Optimization service.
+        </p>
+        <div class="card-grid" id="carbonDataContainer">
+            <p class="loading-text">Fetching data...</p>
+        </div>
+    </div>
+
+    <script>
+        const backIcon = document.getElementById("backIcon");
+        const tenantDropdown = document.getElementById("tenantDropdown");
+        const subscriptionDropdown = document.getElementById("subscriptionDropdown");
+        const carbonDataContainer = document.getElementById("carbonDataContainer");
+
+        backIcon.onclick = () => {
+            window.location.href = "/azure_landing";
+        };
+
+        function fetchAzureTenants() {
+            fetch('/api/azure/tenants/').then(res => res.json()).then(data => {
+                tenantDropdown.innerHTML = "";
+                data.tenants.forEach(tenant => {
+                    const opt = document.createElement("option");
+                    opt.value = tenant.tenant_id;
+                    opt.text = tenant.display_name || tenant.tenant_id;
+                    tenantDropdown.appendChild(opt);
+                });
+            }).catch(() => tenantDropdown.innerHTML = "<option>Failed to fetch</option>");
+        }
+
+        function fetchAzureSubscriptions() {
+            fetch('/api/azure/subscriptions/').then(res => res.json()).then(data => {
+                subscriptionDropdown.innerHTML = "";
+                data.subscriptions.forEach(sub => {
+                    const opt = document.createElement("option");
+                    opt.value = sub.subscription_id;
+                    opt.text = sub.display_name;
+                    subscriptionDropdown.appendChild(opt);
+                });
+                // Fetch data on initial load
+                fetchCarbonData(subscriptionDropdown.value);
+            }).catch(() => subscriptionDropdown.innerHTML = "<option>Failed to fetch</option>");
+        }
+
+        // Fetch data from our new API endpoint
+        function fetchCarbonData(subscriptionId) {
+            if (!subscriptionId) return;
+            carbonDataContainer.innerHTML = `<p class="loading-text">Fetching carbon data for ${subscriptionId}...</p>`;
+            
+            fetch(`/api/azure/carbon/summary/${subscriptionId}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
+                    renderCarbonSummary(data);
+                })
+                .catch(err => {
+                    carbonDataContainer.innerHTML = `<p class="error">Failed to fetch carbon data: ${err.message}</p>`;
+                });
+        }
+
+        // Render the data using the consistent "card" component
+        function renderCarbonSummary(data) {
+            // Helper to create a card
+            const createMetricCard = (title, value, icon, color) => `
+                <div class="card" style="text-decoration: none; color: #63afe9;">
+                    <i class="${icon} card-icon" style="color: ${color}; font-size: 3em;"></i>
+                    <div class="metric-value" style="color: ${color};">
+                        ${(value || 0).toFixed(2)} <span style="font-size: 0.5em;">kgCO2e</span>
+                    </div>
+                    <div class="metric-title">${title}</div>
+                </div>
+            `;
+
+            carbonDataContainer.innerHTML = `
+                ${createMetricCard(
+                    'Total Emissions', 
+                    data.total_carbon_emission, 
+                    'fas fa-leaf', 
+                    '#4caf50'
+                )}
+                ${createMetricCard(
+                    'Scope 1 (Direct)', 
+                    data.total_carbon_emission_scope1, 
+                    'fas fa-industry', 
+                    '#ff9800'
+                )}
+                ${createMetricCard(
+                    'Scope 2 (Indirect - Energy)', 
+                    data.total_carbon_emission_scope2, 
+                    'fas fa-bolt', 
+                    '#2196f3'
+                )}
+                ${createMetricCard(
+                    'Scope 3 (Other Indirect)', 
+                    data.total_carbon_emission_scope3, 
+                    'fas fa-truck-moving', 
+                    '#9c27b0'
+                )}
+            `;
+        }
+
+        // Initial Load
+        fetchAzureTenants();
+        fetchAzureSubscriptions();
+        subscriptionDropdown.onchange = () => fetchCarbonData(subscriptionDropdown.value);
+    </script>
+</body>
+</html>

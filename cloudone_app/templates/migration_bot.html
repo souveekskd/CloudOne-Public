@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CloudOne - Migration Bot</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/main.css">
+
+    <style>
+        .migration-form { background: #181818; border-radius: 10px; padding: 25px; max-width: 800px; margin: 20px auto; }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .form-group h3 { margin-top: 10px; margin-bottom: 0; color: #74bcff; grid-column: 1 / -1; }
+        .form-group.full-width { grid-column: 1 / -1; }
+        .form-group textarea { min-height: 80px; font-family: 'Segoe UI', sans-serif; }
+        .form-group input[type="checkbox"] { width: auto; margin-right: 10px; }
+
+        .radio-group label { display: inline-block; margin-right: 20px; background: #222; padding: 10px 15px; border-radius: 6px; cursor: pointer; border: 1px solid #333; }
+        .radio-group input[type="radio"] { display: none; }
+        .radio-group input[type="radio"]:checked + label { background: #1565c0; border-color: #74bcff; }
+        
+        button#generatePlanBtn:disabled { background: #333; }
+
+        #planResult { background: #181818; border-radius: 10px; margin-top: 30px; display: none; overflow: hidden; }
+        .tab-bar { display: flex; background: #222; }
+        .tab-link { padding: 15px 20px; cursor: pointer; color: #aaa; border-bottom: 3px solid transparent; }
+        .tab-link:hover { background: #333; }
+        .tab-link.active { color: #74bcff; border-bottom: 3px solid #1565c0; }
+        .tab-content { padding: 25px; }
+        .tab-pane { display: none; }
+        .tab-pane.active { display: block; }
+
+        #planResult pre { background: #222; padding: 15px; border-radius: 6px; white-space: pre-wrap; word-wrap: break-word; font-family: 'Courier New', Courier, monospace; }
+        #planResult ul { background: #222; padding: 15px 15px 15px 40px; border-radius: 6px; }
+        #planResult ol { background: #222; padding: 15px 15px 15px 40px; border-radius: 6px; }
+        .cost-note { font-size: 0.9em; color: #aaa; font-style: italic; }
+
+        .cost-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        .cost-table th, .cost-table td { border: 1px solid #333; padding: 10px; text-align: left; }
+        .cost-table th { background: #222; }
+        .cost-table .cost-value { font-size: 1.2em; font-weight: bold; color: #4caf50; }
+        .cost-table .total-row td { font-weight: bold; font-size: 1.2em; color: #fafafa; border-top: 2px solid #74bcff; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <i class="fas fa-arrow-left header-icon" id="backIcon"></i>
+        <div class="dropdown-group">
+            <label>Tenant:</label>
+            <select id="tenantDropdown"><option>Loading...</option></select>
+            <label>Subscription:</label>
+            <select id="subscriptionDropdown"><option>Loading...</option></select>
+        </div>
+    </div>
+    <div class="content">
+        <h2>Cloud Migration Bot (Architect Mode)</h2>
+
+        <div class="migration-form">
+            <div class="form-grid">
+                <div class="form-group full-width"><h3>1. Describe Your Compute Workload</h3></div>
+                <div class="form-group">
+                    <label for="appName">Application Name</label>
+                    <input type="text" id="appName" placeholder="e.g., HR Portal">
+                </div>
+                <div class="form-group">
+                    <label for="numUsers">Number of Users</label>
+                    <input type="number" id="numUsers" placeholder="e.g., 500">
+                </div>
+                <div class="form-group">
+                    <label for="systemOS">Operating System</label>
+                    <select id="systemOS">
+                        <option value="Windows Server">Windows Server</option>
+                        <option value="Linux (RHEL)">Linux (RHEL)</option>
+                        <option value="Linux (Ubuntu)">Linux (Ubuntu)</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="systemVersion">OS Version</label>
+                    <input type="text" id="systemVersion" placeholder="e.g., 2019">
+                </div>
+                <div class="form-group">
+                    <label for="vCore">vCPUs</label>
+                    <input type="number" id="vCore" placeholder="e.g., 8">
+                </div>
+                <div class="form-group">
+                    <label for="systemRAM">RAM (GB)</label>
+                    <input type="number" id="systemRAM" placeholder="e.g., 32">
+                </div>
+                <div class="form-group">
+                    <label for="storageType">Storage Type</label>
+                    <select id="storageType">
+                        <option value="SSD">SSD</option>
+                        <option value="HDD">HDD</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="storageSize">Storage Size (GB)</label>
+                    <input type="number" id="storageSize" placeholder="e.g., 512">
+                </div>
+                <div class="form-group full-width">
+                    <label for="region">Target Azure Region</label>
+                    <input type="text" id="region" placeholder="e.g., eastus">
+                </div>
+                <div class="form-group full-width"><h3>2. Describe Your Database Workload</h3></div>
+                <div class="form-group full-width">
+                    <label><input type="checkbox" id="db_required"> Is a database required?</label>
+                </div>
+                <div id="db_details_group" class="form-grid full-width hidden">
+                    <div class="form-group">
+                        <label for="db_type">Database Type</label>
+                        <select id="db_type">
+                            <option value="SQL Server">SQL Server</option>
+                            <option value="MySQL">MySQL</option>
+                            <option value="PostgreSQL">PostgreSQL</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="db_vCore">DB vCores</label>
+                        <input type="number" id="db_vCore" placeholder="e.g., 4">
+                    </div>
+                    <div class="form-group">
+                        <label for="db_ram">DB RAM (GB)</label>
+                        <input type="number" id="db_ram" placeholder="e.g., 16">
+                    </div>
+                    <div class="form-group">
+                        <label for="db_size">DB Size (GB)</label>
+                        <input type="number" id="db_size" placeholder="e.g., 100">
+                    </div>
+                </div>
+                <div class="form-group full-width"><h3>3. Other Details</h3></div>
+                <div class="form-group full-width">
+                    <label for="integration_details">Integration Details</label>
+                    <textarea id="integration_details" placeholder="e.g., Connects to SAP via REST API, nightly flat-file batch to FTP"></textarea>
+                </div>
+                <div class="form-group full-width">
+                    <h3>4. Choose Target Strategy</h3>
+                    <div class="radio-group">
+                        <input type="radio" id="targetIaaS" name="targetType" value="IaaS" checked>
+                        <label for="targetIaaS"><i class="fas fa-server"></i> IaaS (Rehost)</label>
+                        <input type="radio" id="targetPaaS" name="targetType" value="PaaS">
+                        <label for="targetPaaS"><i class="fas fa-layer-group"></i> PaaS (Replatform)</label>
+                        <input type="radio" id="targetContainer" name="targetType" value="Container">
+                        <label for="targetContainer"><i class="fab fa-docker"></i> Container (Refactor)</label>
+                    </div>
+                </div>
+            </div>
+            <button id="generatePlanBtn" class="btn btn-primary" style="margin-top: 20px; width: 100%; font-size: 1.1em;">Generate Migration Plan</button>
+        </div>
+
+        <div id="planLoader" class="loading-text hidden" style="text-align: center; font-size: 1.2em; margin-top: 30px;">
+            <i class="fas fa-robot fa-spin"></i> Migration bot is analyzing and preparing solution...
+        </div>
+
+        <div id="planResult">
+            <div class="tab-bar">
+                <span class="tab-link active" onclick="openTab(event, 'plan')">Migration Plan</span>
+                <span class="tab-link" onclick="openTab(event, 'cost')">Cost Estimate</span>
+            </div>
+            <div id="plan" class="tab-pane active">
+                <h3 id="planStrategyName"></h3>
+                <h4>Migration Steps</h4>
+                <ol id="planSteps"></ol>
+                <h4>Other Required Resources</h4>
+                <ul id="planResourceList"></ul>
+                <h4>Database Recommendation</h4>
+                <pre id="planDB"></pre>
+                <h4>Integration Notes</h4>
+                <pre id="planIntegrations"></pre>
+            </div>
+            <div id="cost" class="tab-pane">
+                <h3>Estimated Monthly Cost (PAYG)</h3>
+                <table class="cost-table">
+                    <thead>
+                        <tr>
+                            <th>Resource</th>
+                            <th>SKU / Tier</th>
+                            <th>Estimated Monthly Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td id="computeResourceName">Primary Compute</td>
+                            <td id="computeSku">N/A</td>
+                            <td id="computeCost" class="cost-value">N/A</td>
+                        </tr>
+                        <tr>
+                            <td id="dbResourceName">Database</td>
+                            <td id="dbSku">N/A</td>
+                            <td id="dbCost" class="cost-value">N/A</td>
+                        </tr>
+                        <tr class="total-row">
+                            <td colspan="2">Total Estimated Monthly Cost</td>
+                            <td id="totalCost" class="cost-value">N/A</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <p class="cost-note">Note: Costs are AI-driven estimates based on Pay-As-You-Go pricing. They do not include storage, bandwidth, Public IPs, or other ancillary services unless specified. Actual costs may vary.</p>
+            </div>
+        </div>
+    </div>
+    <script>
+        // ... (JavaScript remains unchanged) ...
+        const backIcon = document.getElementById("backIcon");
+        const tenantDropdown = document.getElementById("tenantDropdown");
+        const subscriptionDropdown = document.getElementById("subscriptionDropdown");
+        const generatePlanBtn = document.getElementById("generatePlanBtn");
+        const planLoader = document.getElementById("planLoader");
+        const planResult = document.getElementById("planResult");
+        const dbRequiredCheck = document.getElementById("db_required");
+        const dbDetailsGroup = document.getElementById("db_details_group");
+        dbRequiredCheck.onchange = () => {
+            dbDetailsGroup.classList.toggle("hidden", !dbRequiredCheck.checked);
+        };
+        backIcon.onclick = () => { window.location.href = "/azure_landing"; };
+        generatePlanBtn.onclick = () => {
+            const payload = {
+                appName: document.getElementById("appName").value,
+                numUsers: document.getElementById("numUsers").value,
+                systemOS: document.getElementById("systemOS").value,
+                systemVersion: document.getElementById("systemVersion").value,
+                vCore: document.getElementById("vCore").value,
+                systemRAM: document.getElementById("systemRAM").value,
+                storageType: document.getElementById("storageType").value,
+                storageSize: document.getElementById("storageSize").value,
+                region: document.getElementById("region").value,
+                target_type: document.querySelector('input[name="targetType"]:checked').value,
+                db_required: document.getElementById("db_required").checked,
+                db_type: document.getElementById("db_type").value,
+                db_vCore: document.getElementById("db_vCore").value,
+                db_ram: document.getElementById("db_ram").value,
+                db_size: document.getElementById("db_size").value,
+                integration_details: document.getElementById("integration_details").value
+            };
+            planLoader.classList.remove("hidden");
+            planResult.style.display = "none";
+            fetch('/api/azure/migrate/manual_plan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+            .then(res => res.json())
+            .then(data => {
+                planLoader.classList.add("hidden");
+                if (data.error) {
+                    alert(`Error generating plan: ${data.error}`);
+                    return;
+                }
+                const compute = data.compute_recommendation || {};
+                const db = data.database_recommendation || {};
+                document.getElementById("planStrategyName").textContent = data.strategy_name || "N/A";
+                document.getElementById("planSteps").innerHTML = (data.migration_steps || []).map(step => `<li>${step}</li>`).join('');
+                document.getElementById("planResourceList").innerHTML = (data.resource_list || []).map(res => `<li>${res}</li>`).join('');
+                document.getElementById("planDB").textContent = db.analysis || "N/A";
+                document.getElementById("planIntegrations").textContent = data.integration_notes || "N/A";
+                document.getElementById("computeResourceName").textContent = compute.resource_type || "Primary Compute";
+                document.getElementById("computeSku").textContent = compute.recommended_sku || "N/A";
+                document.getElementById("computeCost").textContent = `$${(compute.estimated_monthly_cost || 0).toFixed(2)} USD`;
+                document.getElementById("dbResourceName").textContent = db.resource_type || "Database";
+                document.getElementById("dbSku").textContent = db.recommended_sku || "N/A";
+                document.getElementById("dbCost").textContent = `$${(db.estimated_monthly_cost || 0).toFixed(2)} USD`;
+                document.getElementById("totalCost").textContent = `$${(data.total_estimated_monthly_cost || 0).toFixed(2)} USD`;
+                planResult.style.display = "block";
+                openTab(null, 'plan', true);
+            })
+            .catch(err => {
+                planLoader.classList.add("hidden");
+                alert(`Network error: ${err.message}`);
+            });
+        };
+        function openTab(evt, tabName, isDefault = false) {
+            var i, tabcontent, tablinks;
+            tabcontent = document.getElementsByClassName("tab-pane");
+            for (i = 0; i < tabcontent.length; i++) {
+                tabcontent[i].style.display = "none";
+            }
+            tablinks = document.getElementsByClassName("tab-link");
+            for (i = 0; i < tablinks.length; i++) {
+                tablinks[i].className = tablinks[i].className.replace(" active", "");
+            }
+            document.getElementById(tabName).style.display = "block";
+            if (isDefault) {
+                document.querySelector(`.tab-link[onclick*="'${tabName}'"]`).className += " active";
+            } else if (evt) {
+                evt.currentTarget.className += " active";
+            }
+        }
+        function fetchAzureTenants() {
+            fetch('/api/azure/tenants/')
+                .then(res => res.json())
+                .then(data => {
+                    tenantDropdown.innerHTML = "";
+                    if (data.tenants && data.tenants.length) {
+                        data.tenants.forEach(tenant => {
+                            const opt = document.createElement("option");
+                            opt.value = tenant.tenant_id;
+                            opt.text = tenant.display_name || tenant.tenant_id;
+                            tenantDropdown.appendChild(opt);
+                        });
+                    } else {
+                        tenantDropdown.innerHTML = "<option>No tenants found</option>";
+                    }
+                }).catch(() => {
+                    tenantDropdown.innerHTML = "<option>Failed to fetch tenants</option>";
+                });
+        }
+        function fetchAzureSubscriptions() {
+            fetch('/api/azure/subscriptions/')
+                .then(res => res.json())
+                .then(data => {
+                    subscriptionDropdown.innerHTML = "";
+                    if (data.subscriptions && data.subscriptions.length) {
+                        data.subscriptions.forEach(sub => {
+                            const opt = document.createElement("option");
+                            opt.value = sub.subscription_id;
+                            opt.text = sub.display_name;
+                            subscriptionDropdown.appendChild(opt);
+                        });
+                    } else {
+                        subscriptionDropdown.innerHTML = "<option>No subscriptions found</option>";
+                    }
+                }).catch(() => {
+                    subscriptionDropdown.innerHTML = "<option>Failed to fetch subscriptions</option>";
+                });
+        }
+        fetchAzureTenants();
+        fetchAzureSubscriptions();
+    </script>
+</body>
+</html>

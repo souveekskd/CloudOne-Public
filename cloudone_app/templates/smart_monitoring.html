@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CloudOne - Smart Monitoring</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/main.css">
+    <style>
+        .tab-bar { display: flex; border-bottom: 1px solid var(--color-border); margin-bottom: 20px; }
+        .tab-link { padding: 10px 20px; cursor: pointer; color: var(--color-text-muted); border-bottom: 3px solid transparent; font-size: 1.1em; }
+        .tab-link:hover { background: var(--color-background-light); }
+        .tab-link.active { color: var(--color-primary); border-bottom: 3px solid var(--color-primary-dark); }
+        .tab-pane { display: none; }
+        .tab-pane.active { display: block; }
+        
+        .alert-High { color: var(--color-danger); font-weight: bold; }
+        .alert-Medium { color: var(--color-impact-medium); }
+        
+        .state-Running { color: #4caf50; }
+        .state-Stopped, .state-Deallocated, .state-Other { color: #ccc; }
+        
+        .data-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        .data-table th, .data-table td { border: 1px solid var(--color-border); padding: 10px; text-align: left; }
+        .data-table th { background: var(--color-background-light); }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <i class="fas fa-arrow-left header-icon" id="backIcon"></i>
+        <div class="dropdown-group">
+            <label>Tenant:</label>
+            <select id="tenantDropdown"><option>Loading...</option></select>
+            <label>Subscription:</label>
+            <select id="subscriptionDropdown"><option>Loading...</option></select>
+        </div>
+    </div>
+    <div class="content">
+        <h2>Smart Monitoring</h2>
+        <p style="color: var(--color-text-secondary); max-width: 800px;">
+            Real-time tag and state compliance monitoring. Data is refreshed automatically every minute.
+        </p>
+
+        <div class="tab-bar">
+            <span class="tab-link active" onclick="openTab(event, 'Alerts')"><i class="fas fa-bell"></i> Alerts</span>
+            <span class="tab-link" onclick="openTab(event, 'Monitored')"><i class="fas fa-desktop"></i> Monitored Resources</span>
+            <span class="tab-link" onclick="openTab(event, 'NotConfigured')"><i class="fas fa-cogs"></i> Not Configured</span>
+        </div>
+
+        <div id="Alerts" class="tab-pane active">
+            <h3>Active Alerts</h3>
+            <div id="alertsContainer"><p class="loading-text">Loading...</p></div>
+        </div>
+
+        <div id="Monitored" class="tab-pane">
+            <h3>Monitored Resources (Healthy)</h3>
+            <div id="monitoredContainer"><p class="loading-text">Loading...</p></div>
+        </div>
+        
+        <div id="NotConfigured" class="tab-pane">
+            <h3>Monitoring Not Configured</h3>
+            <div id="notConfiguredContainer"><p class="loading-text">Loading...</p></div>
+        </div>
+    </div>
+
+    <script>
+        const backIcon = document.getElementById("backIcon");
+        const tenantDropdown = document.getElementById("tenantDropdown");
+        const subscriptionDropdown = document.getElementById("subscriptionDropdown");
+        
+        const alertsContainer = document.getElementById("alertsContainer");
+        const monitoredContainer = document.getElementById("monitoredContainer");
+        const notConfiguredContainer = document.getElementById("notConfiguredContainer");
+        let refreshInterval;
+
+        backIcon.onclick = () => { window.location.href = "/azure_landing"; };
+
+        function fetchAzureTenants() {
+            fetch('/api/azure/tenants/').then(res => res.json()).then(data => {
+                tenantDropdown.innerHTML = "";
+                data.tenants.forEach(tenant => {
+                    const opt = document.createElement("option");
+                    opt.value = tenant.tenant_id;
+                    opt.text = tenant.display_name || tenant.tenant_id;
+                    tenantDropdown.appendChild(opt);
+                });
+            }).catch(() => tenantDropdown.innerHTML = "<option>Failed to fetch</option>");
+        }
+
+        function fetchAzureSubscriptions() {
+            fetch('/api/azure/subscriptions/').then(res => res.json()).then(data => {
+                subscriptionDropdown.innerHTML = "";
+                data.subscriptions.forEach(sub => {
+                    const opt = document.createElement("option");
+                    opt.value = sub.subscription_id;
+                    opt.text = sub.display_name;
+                    subscriptionDropdown.appendChild(opt);
+                });
+                // Initial load
+                handleSubscriptionChange(subscriptionDropdown.value);
+            }).catch(() => subscriptionDropdown.innerHTML = "<option>Failed to fetch</option>");
+        }
+        
+        function handleSubscriptionChange(subscriptionId) {
+            if (refreshInterval) clearInterval(refreshInterval);
+            
+            loadMonitoringData(subscriptionId); // Load immediately
+            
+            // This is your 1-minute refresh.
+            refreshInterval = setInterval(() => {
+                loadMonitoringData(subscriptionId);
+            }, 60000);
+        }
+
+        function loadMonitoringData(subscriptionId) {
+            if (!subscriptionId) return;
+            
+            // Set all to loading only if they aren't already populated
+            if (!alertsContainer.querySelector("table")) {
+                alertsContainer.innerHTML = `<p class="loading-text">Fetching monitoring data...</p>`;
+            }
+            if (!monitoredContainer.querySelector("table")) {
+                monitoredContainer.innerHTML = `<p class="loading-text">Fetching monitoring data...</p>`;
+            }
+            if (!notConfiguredContainer.querySelector("table")) {
+                notConfiguredContainer.innerHTML = `<p class="loading-text">Fetching monitoring data...</p>`;
+            }
+
+            fetch(`/api/azure/monitoring/status/${subscriptionId}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.error) throw new Error(data.error);
+                    
+                    renderAlertsTable(alertsContainer, data.alerts);
+                    renderMonitoredTable(monitoredContainer, data.monitored);
+                    renderNotConfiguredTable(notConfiguredContainer, data.notConfigured);
+                })
+                .catch(err => {
+                    const errorMsg = `<p class="error">Failed to load data: ${err.message}</p>`;
+                    alertsContainer.innerHTML = errorMsg;
+                    monitoredContainer.innerHTML = errorMsg;
+                    notConfiguredContainer.innerHTML = errorMsg;
+                });
+        }
+        
+        function renderAlertsTable(container, items) {
+            if (items.length === 0) {
+                container.innerHTML = "<p>No active alerts found.</p>";
+                return;
+            }
+            container.innerHTML = `
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Alert</th>
+                            <th>Resource Name</th>
+                            <th>Type</th>
+                            <th>Status</th>
+                            <th>Reason</th>
+                            <th>Criticality</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${items.map(item => `
+                            <tr>
+                                <td class="alert-${item.alertLevel}"><i class="fas fa-bell"></i> ${item.alertLevel}</td>
+                                <td>${item.name}</td>
+                                <td>${item.type.split('/').pop()}</td>
+                                <td class="state-${item.powerState}">${item.powerState}</td>
+                                <td>${item.alertReason}</td>
+                                <td>${item.criticalityTag}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+        
+        function renderMonitoredTable(container, items) {
+             if (items.length === 0) {
+                container.innerHTML = "<p>No healthy monitored resources found.</p>";
+                return;
+            }
+            container.innerHTML = `
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Resource Name</th>
+                            <th>Type</th>
+                            <th>Status</th>
+                            <th>Criticality</th>
+                            <th>Monitor</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${items.map(item => `
+                            <tr>
+                                <td>${item.name}</td>
+                                <td>${item.type.split('/').pop()}</td>
+                                <td class="state-${item.powerState}">${item.powerState}</td>
+                                <td>${item.criticalityTag}</td>
+                                <td>${item.monitorTag}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+        
+        function renderNotConfiguredTable(container, items) {
+             if (items.length === 0) {
+                container.innerHTML = "<p>All resources are configured for monitoring.</p>";
+                return;
+            }
+            container.innerHTML = `
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Resource Name</th>
+                            <th>Type</th>
+                            <th>Status</th>
+                            <th>Monitor Tag</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${items.map(item => `
+                            <tr>
+                                <td>${item.name}</td>
+                                <td>${item.type.split('/').pop()}</td>
+                                <td class="state-${item.powerState}">${item.powerState}</td>
+                                <td>${item.monitorTag}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        // --- Tabbed Interface ---
+        function openTab(evt, tabName) {
+            let i, tabcontent, tablinks;
+            tabcontent = document.getElementsByClassName("tab-pane");
+            for (i = 0; i < tabcontent.length; i++) {
+                tabcontent[i].style.display = "none";
+            }
+            tablinks = document.getElementsByClassName("tab-link");
+            for (i = 0; i < tablinks.length; i++) {
+                tablinks[i].className = tablinks[i].className.replace(" active", "");
+            }
+            document.getElementById(tabName).style.display = "block";
+            evt.currentTarget.className += " active";
+        }
+        
+        // --- Initial Load ---
+        fetchAzureTenants();
+        fetchAzureSubscriptions();
+        subscriptionDropdown.onchange = () => handleSubscriptionChange(subscriptionDropdown.value);
+        
+        // Clear interval when user navigates away
+        window.onbeforeunload = () => {
+            if (refreshInterval) clearInterval(refreshInterval);
+        };
+    </script>
+</body>
+</html>

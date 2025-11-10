@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CloudOne - Advisor Recommendations</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+    <div class="header">
+        <i class="fas fa-arrow-left header-icon" id="backIcon"></i>
+        <div class="dropdown-group">
+            <label>Tenant:</label>
+            <select id="tenantDropdown"><option>Loading...</option></select>
+            <label>Subscription:</label>
+            <select id="subscriptionDropdown"><option>Loading...</option></select>
+        </div>
+    </div>
+    <div class="content">
+   
+        <h2 id="pageTitle">Loading Recommendations...</h2>
+        <div id="recommendationsContainer">
+            <p class="loading-text">Loading...</p>
+        </div>
+    </div>
+    <script>
+        // ... (JavaScript remains unchanged) ...
+        const backIcon = document.getElementById("backIcon");
+        const tenantDropdown = document.getElementById("tenantDropdown");
+        const subscriptionDropdown = document.getElementById("subscriptionDropdown");
+        const pageTitle = document.getElementById("pageTitle");
+        const container = document.getElementById("recommendationsContainer");
+        const urlParams = new URLSearchParams(window.location.search);
+        const category = urlParams.get('category');
+        pageTitle.textContent = `${category} Recommendations`;
+
+        backIcon.onclick = () => {
+            window.location.href = "/environment_security_score";
+        };
+
+        function fetchAzureTenants() {
+            fetch('/api/azure/tenants/').then(res => res.json()).then(data => {
+                tenantDropdown.innerHTML = "";
+                data.tenants.forEach(tenant => {
+                    const opt = document.createElement("option");
+                    opt.value = tenant.tenant_id;
+                    opt.text = tenant.display_name || tenant.tenant_id;
+                    tenantDropdown.appendChild(opt);
+                });
+            }).catch(() => tenantDropdown.innerHTML = "<option>Failed to fetch</option>");
+        }
+
+        function fetchAzureSubscriptions() {
+            fetch('/api/azure/subscriptions/').then(res => res.json()).then(data => {
+                subscriptionDropdown.innerHTML = "";
+                data.subscriptions.forEach(sub => {
+                    const opt = document.createElement("option");
+                    opt.value = sub.subscription_id;
+                    opt.text = sub.display_name;
+                    subscriptionDropdown.appendChild(opt);
+                });
+                fetchRecommendations(subscriptionDropdown.value, category);
+            }).catch(() => subscriptionDropdown.innerHTML = "<option>Failed to fetch</option>");
+        }
+
+        function fetchRecommendations(subscriptionId, category) {
+            if (!subscriptionId || !category) return;
+            container.innerHTML = `<p class="loading-text">Fetching recommendations for ${category}...</p>`;
+            
+            fetch(`/api/azure/advisor/recommendations/${subscriptionId}/${category}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
+                    renderRecommendations(data.recommendations);
+                })
+                .catch(err => {
+                    container.innerHTML = `<p class="error">Failed to fetch recommendations: ${err.message}</p>`;
+                });
+        }
+
+        function renderRecommendations(recs) {
+            if (recs.length === 0) {
+                container.innerHTML = "<p>No recommendations found for this category.</p>";
+                return;
+            }
+
+            const table = document.createElement("table");
+            table.innerHTML = `
+                <thead>
+                    <tr>
+                        <th>Impact</th>
+                        <th>Description</th>
+                        <th>Impacted Resource</th>
+                        <th>Learn More</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${recs.map(rec => `
+                        <tr>
+                            <td class="impact-${rec.impact}">${rec.impact}</td>
+                            <td>${rec.description}</td>
+                            <td>${rec.impacted_resource}</td>
+                            <td><a href="${rec.learn_more_link}" target="_blank">Documentation</a></td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            `;
+            container.innerHTML = "";
+            container.appendChild(table);
+        }
+
+        fetchAzureTenants();
+        fetchAzureSubscriptions();
+        subscriptionDropdown.onchange = () => fetchRecommendations(subscriptionDropdown.value, category);
+    </script>
+</body>
+</html>

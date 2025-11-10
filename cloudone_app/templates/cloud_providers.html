@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CloudOne - Cloud Providers</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+    <div class="header">
+        <span style="font-size: 2em; font-weight: bold; color: var(--color-primary);">CloudOne</span>
+        <button class="btn btn-danger" id="logoutBtn">Logout</button>
+    </div>
+
+    <div class="card-grid">
+        <div class="card" id="tileAzure">
+            <i class="fab fa-windows card-icon" style="color: #0078D4;"></i>
+            Azure
+        </div>
+        <div class="card" id="tileAWS">
+            <i class="fab fa-aws card-icon" style="color: #FF9900;"></i>
+            AWS
+        </div>
+        <div class="card" id="tileGCP">
+            <i class="fab fa-google card-icon" style="color: #4285F4;"></i>
+            GCP
+        </div>
+        <div class="card" id="tileOther">
+            <i class="fas fa-cloud card-icon" style="color: #A9A9A9;"></i>
+            Other Cloud
+        </div>
+    </div>
+
+    <div id="spn-modal" class="modal-overlay">
+        <div id="spn-modal-content" class="modal-content">
+            <span class="close" id="closeSpnModal">&times;</span>
+            <h2>One Time SPN Setup</h2>
+            <div class="note" style="color: var(--color-text-muted); font-size:0.9em; margin-bottom:17px;">
+                All fields are optional for 'Already Configured SPN'
+            </div>
+            <form id="spnForm">
+                <input type="text" id="clientId" placeholder="Client ID" required />
+                <input type="text" id="tenantId" placeholder="Tenant ID" required />
+                <input type="text" id="clientSecret" placeholder="Client Secret" required />
+                
+                <button type="submit" class="btn btn-primary">Submit</button>
+                <button type="button" id="alreadyConfiguredBtn" class="btn">Already Configured SPN</button>
+            </form>
+        </div>
+    </div>
+    <script>
+        // ... (JavaScript remains unchanged) ...
+        const tileAzure = document.getElementById("tileAzure");
+        const spnModal = document.getElementById("spn-modal");
+        const closeSpnModal = document.getElementById("closeSpnModal");
+        const spnForm = document.getElementById("spnForm");
+        const alreadyConfiguredBtn = document.getElementById("alreadyConfiguredBtn");
+        const logoutBtn = document.getElementById("logoutBtn");
+
+        tileAzure.onclick = () => {
+            spnModal.style.display = "flex";
+        };
+        closeSpnModal.onclick = () => {
+            spnModal.style.display = "none";
+        };
+        logoutBtn.onclick = () => {
+            window.location.href = "/";
+        };
+
+        spnForm.onsubmit = function(e) {
+            e.preventDefault();
+            const clientId = document.getElementById("clientId").value;
+            const tenantId = document.getElementById("tenantId").value;
+            const clientSecret = document.getElementById("clientSecret").value;
+            if (!clientId || !tenantId || !clientSecret) {
+                alert("All fields (Client ID, Tenant ID, Client Secret) are mandatory.");
+                return;
+            }
+            localStorage.setItem("spnClientId", clientId);
+            localStorage.setItem("spnTenantId", tenantId);
+            localStorage.setItem("spnClientSecret", clientSecret);
+            spnModal.style.display = "none";
+            window.location.href = "/azure_landing";
+        };
+
+        alreadyConfiguredBtn.onclick = function() {
+            spnModal.style.display = "none";
+            window.location.href = "/azure_landing";
+        };
+    </script>
+</body>
+</html>

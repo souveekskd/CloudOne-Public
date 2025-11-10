@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CloudOne - Environment Security Score</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+    <div class="header">
+        <i class="fas fa-home header-icon" id="homeIcon"></i>
+        <div class="dropdown-group">
+            <label>Tenant:</label>
+            <select id="tenantDropdown"><option>Loading...</option></select>
+            <label>Subscription:</label>
+            <select id="subscriptionDropdown"><option>Loading...</option></select>
+        </div>
+    </div>
+    <div class="content">
+        <h2>Environment Score</h2>
+        <div class="card-grid" id="scoresGrid">
+            </div>
+    </div>
+    <script>
+        const homeIcon = document.getElementById("homeIcon");
+        const tenantDropdown = document.getElementById("tenantDropdown");
+        const subscriptionDropdown = document.getElementById("subscriptionDropdown");
+        const scoresGrid = document.getElementById("scoresGrid");
+
+        homeIcon.onclick = () => {
+            window.location.href = "/azure_landing";
+        };
+
+        function fetchAzureTenants() {
+            fetch('/api/azure/tenants/')
+                .then(res => res.json())
+                .then(data => {
+                    tenantDropdown.innerHTML = "";
+                    if (data.tenants && data.tenants.length) {
+                        data.tenants.forEach(tenant => {
+                            const opt = document.createElement("option");
+                            opt.value = tenant.tenant_id;
+                            opt.text = tenant.display_name || tenant.tenant_id;
+                            tenantDropdown.appendChild(opt);
+                        });
+                    } else {
+                        const opt = document.createElement("option");
+                        opt.text = "No tenants found";
+                        tenantDropdown.appendChild(opt);
+                    }
+             }).catch(() => {
+                    tenantDropdown.innerHTML = "<option>Failed to fetch tenants</option>";
+                });
+        }
+
+        function fetchAzureSubscriptions() {
+            fetch('/api/azure/subscriptions/')
+                .then(res => res.json())
+                .then(data => {
+                    subscriptionDropdown.innerHTML = "";
+                    if (data.subscriptions && data.subscriptions.length) {
+                        data.subscriptions.forEach(sub => {
+                            const opt = document.createElement("option");
+                            opt.value = sub.subscription_id;
+                            opt.text = sub.display_name;
+                            subscriptionDropdown.appendChild(opt);
+                        });
+                        fetchScores(subscriptionDropdown.value);
+                    } else {
+                        const opt = document.createElement("option");
+                        opt.text = "No subscriptions found";
+                        subscriptionDropdown.appendChild(opt);
+                    }
+                })
+                .catch(() => {
+                    subscriptionDropdown.innerHTML = "<option>Failed to fetch subscriptions</option>";
+                });
+        }
+
+        function fetchScores(subscriptionId) {
+            scoresGrid.innerHTML = '<div class="card loading-text">Loading scores...</div>'; // Use .card
+            fetch(`/api/azure/security/score/${subscriptionId}`)
+                .then(res => res.json())
+                .then(securityData => {
+                    return fetch(`/api/azure/advisor/scores/${subscriptionId}`)
+                        .then(res => res.json())
+                        .then(advisorData => {
+                            displayScores(securityData, advisorData);
+                        });
+                })
+                .catch(() => {
+                    scoresGrid.innerHTML = '<div class="card error">Failed to load scores</div>'; // Use .card
+                });
+        }
+
+        function displayScores(securityData, advisorData) {
+            const getPillarData = (pillar) => {
+                if (!advisorData || !advisorData[pillar]) {
+                    return { score: 0, details: "N/A" };
+                }
+                const data = advisorData[pillar];
+                return {
+                    score: data.score || 0,
+                    details: `${data.total_recommendations} Recommendations<br>${data.impacted_resources} Impacted Resources`
+                };
+            };
+
+            const costData = getPillarData("cost");
+            const securityAdvisorData = getPillarData("security");
+            const reliabilityData = getPillarData("reliability");
+            const opsData = getPillarData("operationalexcellence");
+            const performanceData = getPillarData("performance");
+
+            const defenderScore = {
+                title: "Security Score",
+                icon: "fas fa-shield-halved",
+                value: securityData.percentage || 0,
+                details: securityData.error ? "N/A" : `Defender Score: ${securityData.current}/${securityData.max}`,
+                color: securityData.error ? "#f44336" : "#4caf50",
+                link: "/advisor_recommendations?category=Security"
+            };
+
+            const scores = [
+                defenderScore,
+                { title: "Cost Score", icon: "fas fa-dollar-sign", value: costData.score, details: costData.details, color: "#ff9800", link: "/advisor_recommendations?category=Cost" },
+                { title: "Reliability Score", icon: "fas fa-server", value: reliabilityData.score, details: reliabilityData.details, color: "#2196f3", link: "/advisor_recommendations?category=Reliability" },
+                { title: "Operational Excellence", icon: "fas fa-cogs", value: opsData.score, details: opsData.details, color: "#9c27b0", link: "/advisor_recommendations?category=OperationalExcellence" },
+                { title: "Performance Score", icon: "fas fa-tachometer-alt", value: performanceData.score, details: performanceData.details, color: "#ff5722", link: "/advisor_recommendations?category=Performance" }
+            ];
+            
+            //
+            // --- REFACTOR ---
+            // Changed "score-card" to "card" to use the unified component style.
+            // Added "card-icon" and "card-text" (mapped) for consistency.
+            //
+            scoresGrid.innerHTML = scores.map(score => `
+                <a href="${score.link}" class="card" style="text-decoration: none; color: #63afe9;">
+                    <i class="${score.icon} card-icon" style="color: ${score.color}; font-size: 3em;"></i>
+                    <div class="card-text" style="font-size: 2.5em; font-weight: bold; margin-bottom: 10px; color: ${score.color};">${score.value}%</div>
+                    <div class="card-text" style="font-size: 0.9em; color: #ccc;">${score.title}<br>${score.details}</div>
+                </a>
+            `).join('');
+        }
+
+        fetchAzureTenants();
+        fetchAzureSubscriptions();
+        
+        subscriptionDropdown.onchange = () => {
+            fetchScores(subscriptionDropdown.value);
+        };
+    </script>
+</body>
+</html>

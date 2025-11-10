@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CloudOne - Orphaned Resources</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/main.css">
+    
+    <style>
+        .category {
+            margin-bottom: 20px;
+        }
+        .category h3 {
+            color: #74bcff;
+            border-bottom: 1px solid #333;
+            padding-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <i class="fas fa-arrow-left header-icon" id="backIcon"></i>
+        <div class="dropdown-group">
+            <label>Tenant:</label>
+            <select id="tenantDropdown"><option>Loading...</option></select>
+            <label>Subscription:</label>
+            <select id="subscriptionDropdown"><option>Loading...</option></select>
+        </div>
+    </div>
+    <div class="content">
+        <h2>Orphaned & Unused Resources</h2>
+        <div id="orphanCategories">
+            <p class="loading-text">Fetching data...</p>
+        </div>
+    </div>
+    <script>
+        // ... (JavaScript remains unchanged) ...
+        const backIcon = document.getElementById("backIcon");
+        const tenantDropdown = document.getElementById("tenantDropdown");
+        const subscriptionDropdown = document.getElementById("subscriptionDropdown");
+        const categoriesDiv = document.getElementById("orphanCategories");
+
+        backIcon.onclick = () => {
+            window.location.href = "/azure_landing";
+        };
+
+        function fetchAzureTenants() {
+            fetch('/api/azure/tenants/')
+                .then(res => res.json())
+                .then(data => {
+                    tenantDropdown.innerHTML = "";
+                     if (data.tenants && data.tenants.length) {
+                        data.tenants.forEach(tenant => {
+                            const opt = document.createElement("option");
+                            opt.value = tenant.tenant_id;
+                            opt.text = tenant.display_name || tenant.tenant_id;
+                            tenantDropdown.appendChild(opt);
+                        });
+                    } else {
+                        tenantDropdown.innerHTML = "<option>No tenants found</option>";
+                    }
+                }).catch(() => {
+                    tenantDropdown.innerHTML = "<option>Failed to fetch tenants</option>";
+                 });
+        }
+
+        function fetchAzureSubscriptions() {
+            fetch('/api/azure/subscriptions/')
+                .then(res => res.json())
+                .then(data => {
+                    subscriptionDropdown.innerHTML = "";
+                    if (data.subscriptions && data.subscriptions.length) {
+                        data.subscriptions.forEach(sub => {
+                            const opt = document.createElement("option");
+                            opt.value = sub.subscription_id;
+                            opt.text = sub.display_name;
+                            subscriptionDropdown.appendChild(opt);
+                        });
+                        fetchOrphans(subscriptionDropdown.value);
+                    } else {
+                        subscriptionDropdown.innerHTML = "<option>No subscriptions found</option>";
+                    }
+                }).catch(() => {
+                    subscriptionDropdown.innerHTML = "<option>Failed to fetch subscriptions</option>";
+                });
+        }
+
+        function fetchOrphans(subscriptionId) {
+            if (!subscriptionId) return;
+            categoriesDiv.innerHTML = `<p class="loading-text">Fetching orphaned resources for ${subscriptionId}...</p>`;
+            
+            fetch(`/api/azure/orphans/${subscriptionId}`)
+                .then(res => res.json())
+                .then(data => {
+                    renderOrphans(data);
+                }).catch(() => {
+                    categoriesDiv.innerHTML = "<p>Failed to fetch orphaned resources</p>";
+                });
+        }
+
+        function renderOrphans(data) {
+            categoriesDiv.innerHTML = "";
+            const categoryMap = {
+                "disks": "Orphaned Disks (Unattached)",
+                "nics": "Orphaned Network Interfaces (Unattached)",
+                "pips": "Orphaned Public IPs (Unattached)",
+                "nsgs": "Orphaned Network Security Groups (Unattached)",
+                "rgs": "Empty Resource Groups"
+            };
+            for (const [key, title] of Object.entries(categoryMap)) {
+                const items = data[key] || [];
+                const categoryDiv = document.createElement("div");
+                categoryDiv.className = "category";
+                categoryDiv.innerHTML = `<h3>${title} (${items.length})</h3>`;
+                if (items.length === 0) {
+                    categoryDiv.innerHTML += "<p>No resources found.</p>";
+                    categoriesDiv.appendChild(categoryDiv);
+                    continue;
+                }
+
+                const table = document.createElement("table");
+                table.innerHTML = `
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Location</th>
+                            <th>Resource Group</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                `;
+                const tbody = table.querySelector("tbody");
+                items.forEach(item => {
+                    const row = document.createElement("tr");
+                    row.innerHTML = `
+                        <td>${item.name}</td>
+                        <td>${item.type}</td>
+                        <td>${item.location}</td>
+                        <td>${item.resource_group}</td>
+                    `;
+                    tbody.appendChild(row);
+                });
+                categoryDiv.appendChild(table);
+                categoriesDiv.appendChild(categoryDiv);
+            }
+        }
+
+        fetchAzureTenants();
+        fetchAzureSubscriptions();
+        
+        subscriptionDropdown.onchange = () => fetchOrphans(subscriptionDropdown.value);
+    </script>
+</body>
+</html>
